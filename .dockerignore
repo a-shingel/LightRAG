@@ -52,6 +52,8 @@ temp/
 
 # VS Code settings (local configuration files)
 .vscode
+.cursor
+*.code-workspace
 
 # file
 TODO.md
