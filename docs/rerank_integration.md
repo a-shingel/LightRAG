@@ -1,47 +1,35 @@
-# Rerank Integration in LightRAG
+# Rerank Integration Guide
 
-This document explains how to configure and use the rerank functionality in LightRAG to improve retrieval quality.
+LightRAG supports reranking functionality to improve retrieval quality by re-ordering documents based on their relevance to the query. Reranking is now controlled per query via the `enable_rerank` parameter (default: True).
 
-## Overview
-
-Reranking is an optional feature that improves the quality of retrieved documents by re-ordering them based on their relevance to the query. This is particularly useful when you want higher precision in document retrieval across all query modes (naive, local, global, hybrid, mix).
-
-## Architecture
-
-The rerank integration follows a simplified design pattern:
-
-- **Single Function Configuration**: All rerank settings (model, API keys, top_k, etc.) are contained within the rerank function
-- **Async Processing**: Non-blocking rerank operations
-- **Error Handling**: Graceful fallback to original results
-- **Optional Feature**: Can be enabled/disabled via configuration
-- **Code Reuse**: Single generic implementation for Jina/Cohere compatible APIs
-
-## Configuration
+## Quick Start
 
 ### Environment Variables
 
-Set this variable in your `.env` file or environment:
+Set these variables in your `.env` file or environment for rerank model configuration:
 
 ```bash
-# Enable/disable reranking
-ENABLE_RERANK=True
+# Rerank model configuration (required when enable_rerank=True in queries)
+RERANK_MODEL=BAAI/bge-reranker-v2-m3
+RERANK_BINDING_HOST=https://api.your-provider.com/v1/rerank
+RERANK_BINDING_API_KEY=your_api_key_here
 ```
 
 ### Programmatic Configuration
 
 ```python
-from lightrag import LightRAG
+from lightrag import LightRAG, QueryParam
 from lightrag.rerank import custom_rerank, RerankModel
 
 # Method 1: Using a custom rerank function with all settings included
-async def my_rerank_func(query: str, documents: list, top_k: int = None, **kwargs):
+async def my_rerank_func(query: str, documents: list, top_n: int = None, **kwargs):
     return await custom_rerank(
         query=query,
         documents=documents,
         model="BAAI/bge-reranker-v2-m3",
         base_url="https://api.your-provider.com/v1/rerank",
         api_key="your_api_key_here",
-        top_k=top_k or 10,  # Handle top_k within the function
+        top_n=top_n or 10,  # Handle top_n within the function
         **kwargs
     )
 
@@ -49,8 +37,19 @@ rag = LightRAG(
     working_dir="./rag_storage",
     llm_model_func=your_llm_func,
     embedding_func=your_embedding_func,
-    enable_rerank=True,
-    rerank_model_func=my_rerank_func,
+    rerank_model_func=my_rerank_func,  # Configure rerank function
+)
+
+# Query with rerank enabled (default)
+result = await rag.aquery(
+    "your query",
+    param=QueryParam(enable_rerank=True)  # Control rerank per query
+)
+
+# Query with rerank disabled
+result = await rag.aquery(
+    "your query",
+    param=QueryParam(enable_rerank=False)
 )
 
 # Method 2: Using RerankModel wrapper
@@ -67,8 +66,16 @@ rag = LightRAG(
     working_dir="./rag_storage",
     llm_model_func=your_llm_func,
     embedding_func=your_embedding_func,
-    enable_rerank=True,
     rerank_model_func=rerank_model.rerank,
+)
+
+# Control rerank per query
+result = await rag.aquery(
+    "your query",
+    param=QueryParam(
+        enable_rerank=True,  # Enable rerank for this query
+        chunk_top_k=5       # Number of chunks to keep after reranking
+    )
 )
 ```
 
@@ -88,7 +95,7 @@ result = await custom_rerank(
     model="BAAI/bge-reranker-v2-m3",
     base_url="https://api.your-provider.com/v1/rerank",
     api_key="your_api_key_here",
-    top_k=10
+    top_n=10
 )
 ```
 
@@ -102,7 +109,7 @@ result = await jina_rerank(
     documents=documents,
     model="BAAI/bge-reranker-v2-m3",
     api_key="your_jina_api_key",
-    top_k=10
+    top_n=10
 )
 ```
 
@@ -116,7 +123,7 @@ result = await cohere_rerank(
     documents=documents,
     model="rerank-english-v2.0",
     api_key="your_cohere_api_key",
-    top_k=10
+    top_n=10
 )
 ```
 
@@ -134,7 +141,7 @@ Reranking is automatically applied at these key retrieval stages:
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
 | `enable_rerank` | bool | False | Enable/disable reranking |
-| `rerank_model_func` | callable | None | Custom rerank function containing all configurations (model, API keys, top_k, etc.) |
+| `rerank_model_func` | callable | None | Custom rerank function containing all configurations (model, API keys, top_n, etc.) |
 
 ## Example Usage
 
@@ -147,14 +154,14 @@ from lightrag.llm.openai import gpt_4o_mini_complete, openai_embedding
 from lightrag.kg.shared_storage import initialize_pipeline_status
 from lightrag.rerank import jina_rerank
 
-async def my_rerank_func(query: str, documents: list, top_k: int = None, **kwargs):
+async def my_rerank_func(query: str, documents: list, top_n: int = None, **kwargs):
     """Custom rerank function with all settings included"""
     return await jina_rerank(
         query=query,
         documents=documents,
         model="BAAI/bge-reranker-v2-m3",
         api_key="your_jina_api_key_here",
-        top_k=top_k or 10,  # Default top_k if not provided
+        top_n=top_n or 10,  # Default top_n if not provided
         **kwargs
     )
 
@@ -164,7 +171,6 @@ async def main():
         working_dir="./rag_storage",
         llm_model_func=gpt_4o_mini_complete,
         embedding_func=openai_embedding,
-        enable_rerank=True,
         rerank_model_func=my_rerank_func,
     )
 
@@ -180,7 +186,7 @@ async def main():
     # Query with rerank (automatically applied)
     result = await rag.aquery(
         "Your question here",
-        param=QueryParam(mode="hybrid", top_k=5)  # This top_k is passed to rerank function
+        param=QueryParam(enable_rerank=True)  # This top_n is passed to rerank function
     )
 
     print(result)
@@ -206,7 +212,7 @@ async def test_rerank():
         model="BAAI/bge-reranker-v2-m3",
         base_url="https://api.your-provider.com/v1/rerank",
         api_key="your_api_key_here",
-        top_k=2
+        top_n=2
     )
 
     for doc in reranked:
@@ -215,11 +221,11 @@ async def test_rerank():
 
 ## Best Practices
 
-1. **Self-Contained Functions**: Include all necessary configurations (API keys, models, top_k handling) within your rerank function
+1. **Self-Contained Functions**: Include all necessary configurations (API keys, models, top_n handling) within your rerank function
 2. **Performance**: Use reranking selectively for better performance vs. quality tradeoff
 3. **API Limits**: Monitor API usage and implement rate limiting within your rerank function
 4. **Fallback**: Always handle rerank failures gracefully (returns original results)
-5. **Top-k Handling**: Handle top_k parameter appropriately within your rerank function
+5. **Top-n Handling**: Handle top_n parameter appropriately within your rerank function
 6. **Cost Management**: Consider rerank API costs in your budget planning
 
 ## Troubleshooting

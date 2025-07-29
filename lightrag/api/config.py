@@ -7,10 +7,32 @@ import argparse
 import logging
 from dotenv import load_dotenv
 from lightrag.utils import get_env_value
+from lightrag.llm.binding_options import OllamaEmbeddingOptions, OllamaLLMOptions
+import sys
 
 from lightrag.constants import (
     DEFAULT_WOKERS,
     DEFAULT_TIMEOUT,
+    DEFAULT_TOP_K,
+    DEFAULT_CHUNK_TOP_K,
+    DEFAULT_HISTORY_TURNS,
+    DEFAULT_MAX_ENTITY_TOKENS,
+    DEFAULT_MAX_RELATION_TOKENS,
+    DEFAULT_MAX_TOTAL_TOKENS,
+    DEFAULT_COSINE_THRESHOLD,
+    DEFAULT_RELATED_CHUNK_NUMBER,
+    DEFAULT_MIN_RERANK_SCORE,
+    DEFAULT_FORCE_LLM_SUMMARY_ON_MERGE,
+    DEFAULT_MAX_ASYNC,
+    DEFAULT_SUMMARY_MAX_TOKENS,
+    DEFAULT_SUMMARY_LANGUAGE,
+    DEFAULT_EMBEDDING_FUNC_MAX_ASYNC,
+    DEFAULT_EMBEDDING_BATCH_NUM,
+    DEFAULT_OLLAMA_MODEL_NAME,
+    DEFAULT_OLLAMA_MODEL_TAG,
+    DEFAULT_OLLAMA_MODEL_SIZE,
+    DEFAULT_OLLAMA_CREATED_AT,
+    DEFAULT_OLLAMA_DIGEST,
 )
 
 # use the .env that is inside the current folder
@@ -20,13 +42,36 @@ load_dotenv(dotenv_path=".env", override=False)
 
 
 class OllamaServerInfos:
-    # Constants for emulated Ollama model information
-    LIGHTRAG_NAME = "lightrag"
-    LIGHTRAG_TAG = os.getenv("OLLAMA_EMULATING_MODEL_TAG", "latest")
-    LIGHTRAG_MODEL = f"{LIGHTRAG_NAME}:{LIGHTRAG_TAG}"
-    LIGHTRAG_SIZE = 7365960935  # it's a dummy value
-    LIGHTRAG_CREATED_AT = "2024-01-15T00:00:00Z"
-    LIGHTRAG_DIGEST = "sha256:lightrag"
+    def __init__(self, name=None, tag=None):
+        self._lightrag_name = name or os.getenv(
+            "OLLAMA_EMULATING_MODEL_NAME", DEFAULT_OLLAMA_MODEL_NAME
+        )
+        self._lightrag_tag = tag or os.getenv(
+            "OLLAMA_EMULATING_MODEL_TAG", DEFAULT_OLLAMA_MODEL_TAG
+        )
+        self.LIGHTRAG_SIZE = DEFAULT_OLLAMA_MODEL_SIZE
+        self.LIGHTRAG_CREATED_AT = DEFAULT_OLLAMA_CREATED_AT
+        self.LIGHTRAG_DIGEST = DEFAULT_OLLAMA_DIGEST
+
+    @property
+    def LIGHTRAG_NAME(self):
+        return self._lightrag_name
+
+    @LIGHTRAG_NAME.setter
+    def LIGHTRAG_NAME(self, value):
+        self._lightrag_name = value
+
+    @property
+    def LIGHTRAG_TAG(self):
+        return self._lightrag_tag
+
+    @LIGHTRAG_TAG.setter
+    def LIGHTRAG_TAG(self, value):
+        self._lightrag_tag = value
+
+    @property
+    def LIGHTRAG_MODEL(self):
+        return f"{self._lightrag_name}:{self._lightrag_tag}"
 
 
 ollama_server_infos = OllamaServerInfos()
@@ -102,14 +147,14 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--max-async",
         type=int,
-        default=get_env_value("MAX_ASYNC", 4, int),
-        help="Maximum async operations (default: from env or 4)",
+        default=get_env_value("MAX_ASYNC", DEFAULT_MAX_ASYNC, int),
+        help=f"Maximum async operations (default: from env or {DEFAULT_MAX_ASYNC})",
     )
     parser.add_argument(
         "--max-tokens",
         type=int,
-        default=get_env_value("MAX_TOKENS", 32768, int),
-        help="Maximum token size (default: from env or 32768)",
+        default=get_env_value("MAX_TOKENS", DEFAULT_SUMMARY_MAX_TOKENS, int),
+        help=f"Maximum token size (default: from env or {DEFAULT_SUMMARY_MAX_TOKENS})",
     )
 
     # Logging configuration
@@ -151,53 +196,19 @@ def parse_args() -> argparse.Namespace:
         help="Path to SSL private key file (required if --ssl is enabled)",
     )
 
-    parser.add_argument(
-        "--history-turns",
-        type=int,
-        default=get_env_value("HISTORY_TURNS", 3, int),
-        help="Number of conversation history turns to include (default: from env or 3)",
-    )
-
-    # Search parameters
-    parser.add_argument(
-        "--top-k",
-        type=int,
-        default=get_env_value("TOP_K", 60, int),
-        help="Number of most similar results to return (default: from env or 60)",
-    )
-    parser.add_argument(
-        "--chunk-top-k",
-        type=int,
-        default=get_env_value("CHUNK_TOP_K", 15, int),
-        help="Number of text chunks to retrieve initially from vector search (default: from env or 15)",
-    )
-    parser.add_argument(
-        "--chunk-rerank-top-k",
-        type=int,
-        default=get_env_value("CHUNK_RERANK_TOP_K", 5, int),
-        help="Number of text chunks to keep after reranking (default: from env or 5)",
-    )
-    parser.add_argument(
-        "--enable-rerank",
-        action="store_true",
-        default=get_env_value("ENABLE_RERANK", False, bool),
-        help="Enable rerank functionality (default: from env or False)",
-    )
-    parser.add_argument(
-        "--cosine-threshold",
-        type=float,
-        default=get_env_value("COSINE_THRESHOLD", 0.2, float),
-        help="Cosine similarity threshold (default: from env or 0.4)",
-    )
-
-    # Ollama model name
+    # Ollama model configuration
     parser.add_argument(
         "--simulated-model-name",
         type=str,
-        default=get_env_value(
-            "SIMULATED_MODEL_NAME", ollama_server_infos.LIGHTRAG_MODEL
-        ),
-        help="Number of conversation history turns to include (default: from env or 3)",
+        default=get_env_value("OLLAMA_EMULATING_MODEL_NAME", DEFAULT_OLLAMA_MODEL_NAME),
+        help="Name for the simulated Ollama model (default: from env or lightrag)",
+    )
+
+    parser.add_argument(
+        "--simulated-model-tag",
+        type=str,
+        default=get_env_value("OLLAMA_EMULATING_MODEL_TAG", DEFAULT_OLLAMA_MODEL_TAG),
+        help="Tag for the simulated Ollama model (default: from env or latest)",
     )
 
     # Namespace
@@ -239,6 +250,29 @@ def parse_args() -> argparse.Namespace:
         help="Embedding binding type (default: from env or ollama)",
     )
 
+    # Conditionally add binding options defined in binding_options module
+    # This will add command line arguments for all binding options (e.g., --ollama-embedding-num_ctx)
+    # and corresponding environment variables (e.g., OLLAMA_EMBEDDING_NUM_CTX)
+    if "--llm-binding" in sys.argv:
+        try:
+            idx = sys.argv.index("--llm-binding")
+            if idx + 1 < len(sys.argv) and sys.argv[idx + 1] == "ollama":
+                OllamaLLMOptions.add_args(parser)
+        except IndexError:
+            pass
+    elif os.environ.get("LLM_BINDING") == "ollama":
+        OllamaLLMOptions.add_args(parser)
+
+    if "--embedding-binding" in sys.argv:
+        try:
+            idx = sys.argv.index("--embedding-binding")
+            if idx + 1 < len(sys.argv) and sys.argv[idx + 1] == "ollama":
+                OllamaEmbeddingOptions.add_args(parser)
+        except IndexError:
+            pass
+    elif os.environ.get("EMBEDDING_BINDING") == "ollama":
+        OllamaEmbeddingOptions.add_args(parser)
+
     args = parser.parse_args()
 
     # convert relative path to absolute path
@@ -270,6 +304,9 @@ def parse_args() -> argparse.Namespace:
         args.llm_binding = "openai"
         args.embedding_binding = "ollama"
 
+    # Ollama ctx_num
+    args.ollama_num_ctx = get_env_value("OLLAMA_NUM_CTX", 32768, int)
+
     args.llm_binding_host = get_env_value(
         "LLM_BINDING_HOST", get_default_host(args.llm_binding)
     )
@@ -283,7 +320,6 @@ def parse_args() -> argparse.Namespace:
     args.llm_model = get_env_value("LLM_MODEL", "mistral-nemo:latest")
     args.embedding_model = get_env_value("EMBEDDING_MODEL", "bge-m3:latest")
     args.embedding_dim = get_env_value("EMBEDDING_DIM", 1024, int)
-    args.max_embed_tokens = get_env_value("MAX_EMBED_TOKENS", 8192, int)
 
     # Inject chunk configuration
     args.chunk_size = get_env_value("CHUNK_SIZE", 1200, int)
@@ -303,7 +339,7 @@ def parse_args() -> argparse.Namespace:
 
     # Add environment variables that were previously read directly
     args.cors_origins = get_env_value("CORS_ORIGINS", "*")
-    args.summary_language = get_env_value("SUMMARY_LANGUAGE", "English")
+    args.summary_language = get_env_value("SUMMARY_LANGUAGE", DEFAULT_SUMMARY_LANGUAGE)
     args.whitelist_paths = get_env_value("WHITELIST_PATHS", "/health,/api/*")
 
     # For JWT Auth
@@ -318,7 +354,44 @@ def parse_args() -> argparse.Namespace:
     args.rerank_binding_host = get_env_value("RERANK_BINDING_HOST", None)
     args.rerank_binding_api_key = get_env_value("RERANK_BINDING_API_KEY", None)
 
-    ollama_server_infos.LIGHTRAG_MODEL = args.simulated_model_name
+    # Min rerank score configuration
+    args.min_rerank_score = get_env_value(
+        "MIN_RERANK_SCORE", DEFAULT_MIN_RERANK_SCORE, float
+    )
+
+    # Query configuration
+    args.history_turns = get_env_value("HISTORY_TURNS", DEFAULT_HISTORY_TURNS, int)
+    args.top_k = get_env_value("TOP_K", DEFAULT_TOP_K, int)
+    args.chunk_top_k = get_env_value("CHUNK_TOP_K", DEFAULT_CHUNK_TOP_K, int)
+    args.max_entity_tokens = get_env_value(
+        "MAX_ENTITY_TOKENS", DEFAULT_MAX_ENTITY_TOKENS, int
+    )
+    args.max_relation_tokens = get_env_value(
+        "MAX_RELATION_TOKENS", DEFAULT_MAX_RELATION_TOKENS, int
+    )
+    args.max_total_tokens = get_env_value(
+        "MAX_TOTAL_TOKENS", DEFAULT_MAX_TOTAL_TOKENS, int
+    )
+    args.cosine_threshold = get_env_value(
+        "COSINE_THRESHOLD", DEFAULT_COSINE_THRESHOLD, float
+    )
+    args.related_chunk_number = get_env_value(
+        "RELATED_CHUNK_NUMBER", DEFAULT_RELATED_CHUNK_NUMBER, int
+    )
+
+    # Add missing environment variables for health endpoint
+    args.force_llm_summary_on_merge = get_env_value(
+        "FORCE_LLM_SUMMARY_ON_MERGE", DEFAULT_FORCE_LLM_SUMMARY_ON_MERGE, int
+    )
+    args.embedding_func_max_async = get_env_value(
+        "EMBEDDING_FUNC_MAX_ASYNC", DEFAULT_EMBEDDING_FUNC_MAX_ASYNC, int
+    )
+    args.embedding_batch_num = get_env_value(
+        "EMBEDDING_BATCH_NUM", DEFAULT_EMBEDDING_BATCH_NUM, int
+    )
+
+    ollama_server_infos.LIGHTRAG_NAME = args.simulated_model_name
+    ollama_server_infos.LIGHTRAG_TAG = args.simulated_model_tag
 
     return args
 

@@ -176,6 +176,8 @@ async def openai_complete_if_cache(
     verbose_debug(f"Query: {prompt}")
     logger.debug("===== Sending Query to LLM =====")
 
+    messages = kwargs.pop("messages", messages)
+
     try:
         # Don't use async with context manager, use client directly
         if "response_format" in kwargs:
@@ -430,7 +432,7 @@ async def nvidia_openai_complete(
     return result
 
 
-@wrap_embedding_func_with_attrs(embedding_dim=1536, max_token_size=8192)
+@wrap_embedding_func_with_attrs(embedding_dim=1536)
 @retry(
     stop=stop_after_attempt(3),
     wait=wait_exponential(multiplier=1, min=4, max=60),

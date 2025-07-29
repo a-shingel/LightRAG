@@ -10,7 +10,6 @@ from ascii_colors import ASCIIColors
 from lightrag.api import __api_version__ as api_version
 from lightrag import __version__ as core_version
 from lightrag.constants import (
-    DEFAULT_MAX_TOKEN_SUMMARY,
     DEFAULT_FORCE_LLM_SUMMARY_ON_MERGE,
 )
 from fastapi import HTTPException, Security, Request, status
@@ -269,8 +268,6 @@ def display_splash_screen(args: argparse.Namespace) -> None:
     ASCIIColors.yellow(f"{args.summary_language}")
     ASCIIColors.white("    ├─ Max Parallel Insert: ", end="")
     ASCIIColors.yellow(f"{args.max_parallel_insert}")
-    ASCIIColors.white("    ├─ Max Embed Tokens: ", end="")
-    ASCIIColors.yellow(f"{args.max_embed_tokens}")
     ASCIIColors.white("    ├─ Chunk Size: ", end="")
     ASCIIColors.yellow(f"{args.chunk_size}")
     ASCIIColors.white("    ├─ Chunk Overlap Size: ", end="")
@@ -279,10 +276,6 @@ def display_splash_screen(args: argparse.Namespace) -> None:
     ASCIIColors.yellow(f"{args.cosine_threshold}")
     ASCIIColors.white("    ├─ Top-K: ", end="")
     ASCIIColors.yellow(f"{args.top_k}")
-    ASCIIColors.white("    ├─ Max Token Summary: ", end="")
-    ASCIIColors.yellow(
-        f"{get_env_value('MAX_TOKEN_SUMMARY', DEFAULT_MAX_TOKEN_SUMMARY, int)}"
-    )
     ASCIIColors.white("    └─ Force LLM Summary on Merge: ", end="")
     ASCIIColors.yellow(
         f"{get_env_value('FORCE_LLM_SUMMARY_ON_MERGE', DEFAULT_FORCE_LLM_SUMMARY_ON_MERGE, int)}"

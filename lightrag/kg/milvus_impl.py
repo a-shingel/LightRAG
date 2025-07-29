@@ -5,6 +5,7 @@ from dataclasses import dataclass
 import numpy as np
 from lightrag.utils import logger, compute_mdhash_id
 from ..base import BaseVectorStorage
+from ..constants import DEFAULT_MAX_FILE_PATH_LENGTH
 import pipmaster as pm
 
 if not pm.is_installed("pymilvus"):
@@ -41,19 +42,13 @@ class MilvusVectorDBStorage(BaseVectorStorage):
                 FieldSchema(
                     name="entity_name",
                     dtype=DataType.VARCHAR,
-                    max_length=256,
-                    nullable=True,
-                ),
-                FieldSchema(
-                    name="entity_type",
-                    dtype=DataType.VARCHAR,
-                    max_length=64,
+                    max_length=512,
                     nullable=True,
                 ),
                 FieldSchema(
                     name="file_path",
                     dtype=DataType.VARCHAR,
-                    max_length=512,
+                    max_length=DEFAULT_MAX_FILE_PATH_LENGTH,
                     nullable=True,
                 ),
             ]
@@ -62,16 +57,15 @@ class MilvusVectorDBStorage(BaseVectorStorage):
         elif "relationships" in self.namespace.lower():
             specific_fields = [
                 FieldSchema(
-                    name="src_id", dtype=DataType.VARCHAR, max_length=256, nullable=True
+                    name="src_id", dtype=DataType.VARCHAR, max_length=512, nullable=True
                 ),
                 FieldSchema(
-                    name="tgt_id", dtype=DataType.VARCHAR, max_length=256, nullable=True
+                    name="tgt_id", dtype=DataType.VARCHAR, max_length=512, nullable=True
                 ),
-                FieldSchema(name="weight", dtype=DataType.DOUBLE, nullable=True),
                 FieldSchema(
                     name="file_path",
                     dtype=DataType.VARCHAR,
-                    max_length=512,
+                    max_length=DEFAULT_MAX_FILE_PATH_LENGTH,
                     nullable=True,
                 ),
             ]
@@ -88,7 +82,7 @@ class MilvusVectorDBStorage(BaseVectorStorage):
                 FieldSchema(
                     name="file_path",
                     dtype=DataType.VARCHAR,
-                    max_length=512,
+                    max_length=1024,
                     nullable=True,
                 ),
             ]
@@ -100,7 +94,7 @@ class MilvusVectorDBStorage(BaseVectorStorage):
                 FieldSchema(
                     name="file_path",
                     dtype=DataType.VARCHAR,
-                    max_length=512,
+                    max_length=1024,
                     nullable=True,
                 ),
             ]
@@ -227,19 +221,6 @@ class MilvusVectorDBStorage(BaseVectorStorage):
                         logger.debug(f"IndexParams method failed for entity_name: {e}")
                         self._create_scalar_index_fallback("entity_name", "INVERTED")
 
-                    try:
-                        entity_type_index = self._get_index_params()
-                        entity_type_index.add_index(
-                            field_name="entity_type", index_type="INVERTED"
-                        )
-                        self._client.create_index(
-                            collection_name=self.namespace,
-                            index_params=entity_type_index,
-                        )
-                    except Exception as e:
-                        logger.debug(f"IndexParams method failed for entity_type: {e}")
-                        self._create_scalar_index_fallback("entity_type", "INVERTED")
-
                 elif "relationships" in self.namespace.lower():
                     # Create indexes for relationship fields
                     try:
@@ -294,7 +275,6 @@ class MilvusVectorDBStorage(BaseVectorStorage):
                 # Create scalar indexes using fallback
                 if "entities" in self.namespace.lower():
                     self._create_scalar_index_fallback("entity_name", "INVERTED")
-                    self._create_scalar_index_fallback("entity_type", "INVERTED")
                 elif "relationships" in self.namespace.lower():
                     self._create_scalar_index_fallback("src_id", "INVERTED")
                     self._create_scalar_index_fallback("tgt_id", "INVERTED")
@@ -320,14 +300,12 @@ class MilvusVectorDBStorage(BaseVectorStorage):
         if "entities" in self.namespace.lower():
             specific_fields = {
                 "entity_name": {"type": "VarChar"},
-                "entity_type": {"type": "VarChar"},
                 "file_path": {"type": "VarChar"},
             }
         elif "relationships" in self.namespace.lower():
             specific_fields = {
                 "src_id": {"type": "VarChar"},
                 "tgt_id": {"type": "VarChar"},
-                "weight": {"type": "Double"},
                 "file_path": {"type": "VarChar"},
             }
         elif "chunks" in self.namespace.lower():
@@ -559,7 +537,7 @@ class MilvusVectorDBStorage(BaseVectorStorage):
             # Load the collection if it's not already loaded
             # In Milvus, collections need to be loaded before they can be searched
             self._client.load_collection(self.namespace)
-            logger.debug(f"Collection {self.namespace} loaded successfully")
+            # logger.debug(f"Collection {self.namespace} loaded successfully")
 
         except Exception as e:
             logger.error(f"Failed to load collection {self.namespace}: {e}")

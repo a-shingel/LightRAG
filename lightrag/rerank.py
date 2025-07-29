@@ -10,55 +10,58 @@ from .utils import logger
 
 class RerankModel(BaseModel):
     """
-    Pydantic model class for defining a custom rerank model.
-
-    This class provides a convenient wrapper for rerank functions, allowing you to
-    encapsulate all rerank configurations (API keys, model settings, etc.) in one place.
-
-    Attributes:
-        rerank_func (Callable[[Any], List[Dict]]): A callable function that reranks documents.
-            The function should take query and documents as input and return reranked results.
-        kwargs (Dict[str, Any]): A dictionary that contains the arguments to pass to the callable function.
-            This should include all necessary configurations such as model name, API key, base_url, etc.
+    Wrapper for rerank functions that can be used with LightRAG.
 
     Example usage:
-        Rerank model example with Jina:
-        ```python
-        rerank_model = RerankModel(
-            rerank_func=jina_rerank,
-            kwargs={
-                "model": "BAAI/bge-reranker-v2-m3",
-                "api_key": "your_api_key_here",
-                "base_url": "https://api.jina.ai/v1/rerank"
-            }
+    ```python
+    from lightrag.rerank import RerankModel, jina_rerank
+
+    # Create rerank model
+    rerank_model = RerankModel(
+        rerank_func=jina_rerank,
+        kwargs={
+            "model": "BAAI/bge-reranker-v2-m3",
+            "api_key": "your_api_key_here",
+            "base_url": "https://api.jina.ai/v1/rerank"
+        }
+    )
+
+    # Use in LightRAG
+    rag = LightRAG(
+        rerank_model_func=rerank_model.rerank,
+        # ... other configurations
+    )
+
+    # Query with rerank enabled (default)
+    result = await rag.aquery(
+        "your query",
+        param=QueryParam(enable_rerank=True)
+    )
+    ```
+
+    Or define a custom function directly:
+    ```python
+    async def my_rerank_func(query: str, documents: list, top_n: int = None, **kwargs):
+        return await jina_rerank(
+            query=query,
+            documents=documents,
+            model="BAAI/bge-reranker-v2-m3",
+            api_key="your_api_key_here",
+            top_n=top_n or 10,
+            **kwargs
         )
 
-        # Use in LightRAG
-        rag = LightRAG(
-            enable_rerank=True,
-            rerank_model_func=rerank_model.rerank,
-            # ... other configurations
-        )
-        ```
+    rag = LightRAG(
+        rerank_model_func=my_rerank_func,
+        # ... other configurations
+    )
 
-        Or define a custom function directly:
-        ```python
-        async def my_rerank_func(query: str, documents: list, top_k: int = None, **kwargs):
-            return await jina_rerank(
-                query=query,
-                documents=documents,
-                model="BAAI/bge-reranker-v2-m3",
-                api_key="your_api_key_here",
-                top_k=top_k or 10,
-                **kwargs
-            )
-
-        rag = LightRAG(
-            enable_rerank=True,
-            rerank_model_func=my_rerank_func,
-            # ... other configurations
-        )
-        ```
+    # Control rerank per query
+    result = await rag.aquery(
+        "your query",
+        param=QueryParam(enable_rerank=True)  # Enable rerank for this query
+    )
+    ```
     """
 
     rerank_func: Callable[[Any], List[Dict]]
@@ -68,14 +71,14 @@ class RerankModel(BaseModel):
         self,
         query: str,
         documents: List[Dict[str, Any]],
-        top_k: Optional[int] = None,
+        top_n: Optional[int] = None,
         **extra_kwargs,
     ) -> List[Dict[str, Any]]:
         """Rerank documents using the configured model function."""
         # Merge extra kwargs with model kwargs
         kwargs = {**self.kwargs, **extra_kwargs}
         return await self.rerank_func(
-            query=query, documents=documents, top_k=top_k, **kwargs
+            query=query, documents=documents, top_n=top_n, **kwargs
         )
 
 
@@ -95,7 +98,7 @@ class MultiRerankModel(BaseModel):
         query: str,
         documents: List[Dict[str, Any]],
         mode: str = "default",
-        top_k: Optional[int] = None,
+        top_n: Optional[int] = None,
         **kwargs,
     ) -> List[Dict[str, Any]]:
         """Rerank using the appropriate model based on mode."""
@@ -113,7 +116,7 @@ class MultiRerankModel(BaseModel):
             logger.warning(f"No rerank model available for mode: {mode}")
             return documents
 
-        return await model.rerank(query, documents, top_k, **kwargs)
+        return await model.rerank(query, documents, top_n, **kwargs)
 
 
 async def generic_rerank_api(
@@ -122,7 +125,7 @@ async def generic_rerank_api(
     model: str,
     base_url: str,
     api_key: str,
-    top_k: Optional[int] = None,
+    top_n: Optional[int] = None,
     **kwargs,
 ) -> List[Dict[str, Any]]:
     """
@@ -134,7 +137,7 @@ async def generic_rerank_api(
         model: Model identifier
         base_url: API endpoint URL
         api_key: API authentication key
-        top_k: Number of top results to return
+        top_n: Number of top results to return
         **kwargs: Additional API-specific parameters
 
     Returns:
@@ -162,8 +165,8 @@ async def generic_rerank_api(
 
     data = {"model": model, "query": query, "documents": prepared_docs, **kwargs}
 
-    if top_k is not None:
-        data["top_k"] = min(top_k, len(prepared_docs))
+    if top_n is not None:
+        data["top_n"] = min(top_n, len(prepared_docs))
 
     try:
         async with aiohttp.ClientSession() as session:
@@ -203,7 +206,7 @@ async def jina_rerank(
     query: str,
     documents: List[Dict[str, Any]],
     model: str = "BAAI/bge-reranker-v2-m3",
-    top_k: Optional[int] = None,
+    top_n: Optional[int] = None,
     base_url: str = "https://api.jina.ai/v1/rerank",
     api_key: Optional[str] = None,
     **kwargs,
@@ -215,7 +218,7 @@ async def jina_rerank(
         query: The search query
         documents: List of documents to rerank
         model: Jina rerank model name
-        top_k: Number of top results to return
+        top_n: Number of top results to return
         base_url: Jina API endpoint
         api_key: Jina API key
         **kwargs: Additional parameters
@@ -232,7 +235,7 @@ async def jina_rerank(
         model=model,
         base_url=base_url,
         api_key=api_key,
-        top_k=top_k,
+        top_n=top_n,
         **kwargs,
     )
 
@@ -241,7 +244,7 @@ async def cohere_rerank(
     query: str,
     documents: List[Dict[str, Any]],
     model: str = "rerank-english-v2.0",
-    top_k: Optional[int] = None,
+    top_n: Optional[int] = None,
     base_url: str = "https://api.cohere.ai/v1/rerank",
     api_key: Optional[str] = None,
     **kwargs,
@@ -253,7 +256,7 @@ async def cohere_rerank(
         query: The search query
         documents: List of documents to rerank
         model: Cohere rerank model name
-        top_k: Number of top results to return
+        top_n: Number of top results to return
         base_url: Cohere API endpoint
         api_key: Cohere API key
         **kwargs: Additional parameters
@@ -270,7 +273,7 @@ async def cohere_rerank(
         model=model,
         base_url=base_url,
         api_key=api_key,
-        top_k=top_k,
+        top_n=top_n,
         **kwargs,
     )
 
@@ -282,7 +285,7 @@ async def custom_rerank(
     model: str,
     base_url: str,
     api_key: str,
-    top_k: Optional[int] = None,
+    top_n: Optional[int] = None,
     **kwargs,
 ) -> List[Dict[str, Any]]:
     """
@@ -295,7 +298,7 @@ async def custom_rerank(
         model=model,
         base_url=base_url,
         api_key=api_key,
-        top_k=top_k,
+        top_n=top_n,
         **kwargs,
     )
 
@@ -314,7 +317,7 @@ if __name__ == "__main__":
         query = "What is the capital of France?"
 
         result = await jina_rerank(
-            query=query, documents=docs, top_k=2, api_key="your-api-key-here"
+            query=query, documents=docs, top_n=2, api_key="your-api-key-here"
         )
         print(result)
 
