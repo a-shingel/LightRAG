@@ -914,6 +914,143 @@ class PostgreSQLDB:
                 f"PostgreSQL, Failed to migrate doc status metadata/error_msg fields: {e}"
             )
 
+        # Create pagination optimization indexes for LIGHTRAG_DOC_STATUS
+        try:
+            await self._create_pagination_indexes()
+        except Exception as e:
+            logger.error(f"PostgreSQL, Failed to create pagination indexes: {e}")
+
+        # Migrate to ensure new tables LIGHTRAG_FULL_ENTITIES and LIGHTRAG_FULL_RELATIONS exist
+        try:
+            await self._migrate_create_full_entities_relations_tables()
+        except Exception as e:
+            logger.error(
+                f"PostgreSQL, Failed to create full entities/relations tables: {e}"
+            )
+
+    async def _migrate_create_full_entities_relations_tables(self):
+        """Create LIGHTRAG_FULL_ENTITIES and LIGHTRAG_FULL_RELATIONS tables if they don't exist"""
+        tables_to_check = [
+            {
+                "name": "LIGHTRAG_FULL_ENTITIES",
+                "ddl": TABLES["LIGHTRAG_FULL_ENTITIES"]["ddl"],
+                "description": "Full entities storage table",
+            },
+            {
+                "name": "LIGHTRAG_FULL_RELATIONS",
+                "ddl": TABLES["LIGHTRAG_FULL_RELATIONS"]["ddl"],
+                "description": "Full relations storage table",
+            },
+        ]
+
+        for table_info in tables_to_check:
+            table_name = table_info["name"]
+            try:
+                # Check if table exists
+                check_table_sql = """
+                SELECT table_name
+                FROM information_schema.tables
+                WHERE table_name = $1
+                AND table_schema = 'public'
+                """
+
+                table_exists = await self.query(
+                    check_table_sql, {"table_name": table_name.lower()}
+                )
+
+                if not table_exists:
+                    logger.info(f"Creating table {table_name}")
+                    await self.execute(table_info["ddl"])
+                    logger.info(
+                        f"Successfully created {table_info['description']}: {table_name}"
+                    )
+
+                    # Create basic indexes for the new table
+                    try:
+                        # Create index for id column
+                        index_name = f"idx_{table_name.lower()}_id"
+                        create_index_sql = (
+                            f"CREATE INDEX {index_name} ON {table_name}(id)"
+                        )
+                        await self.execute(create_index_sql)
+                        logger.info(f"Created index {index_name} on table {table_name}")
+
+                        # Create composite index for (workspace, id) columns
+                        composite_index_name = f"idx_{table_name.lower()}_workspace_id"
+                        create_composite_index_sql = f"CREATE INDEX {composite_index_name} ON {table_name}(workspace, id)"
+                        await self.execute(create_composite_index_sql)
+                        logger.info(
+                            f"Created composite index {composite_index_name} on table {table_name}"
+                        )
+
+                    except Exception as e:
+                        logger.warning(
+                            f"Failed to create indexes for table {table_name}: {e}"
+                        )
+
+                else:
+                    logger.debug(f"Table {table_name} already exists")
+
+            except Exception as e:
+                logger.error(f"Failed to create table {table_name}: {e}")
+
+    async def _create_pagination_indexes(self):
+        """Create indexes to optimize pagination queries for LIGHTRAG_DOC_STATUS"""
+        indexes = [
+            {
+                "name": "idx_lightrag_doc_status_workspace_status_updated_at",
+                "sql": "CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_lightrag_doc_status_workspace_status_updated_at ON LIGHTRAG_DOC_STATUS (workspace, status, updated_at DESC)",
+                "description": "Composite index for workspace + status + updated_at pagination",
+            },
+            {
+                "name": "idx_lightrag_doc_status_workspace_status_created_at",
+                "sql": "CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_lightrag_doc_status_workspace_status_created_at ON LIGHTRAG_DOC_STATUS (workspace, status, created_at DESC)",
+                "description": "Composite index for workspace + status + created_at pagination",
+            },
+            {
+                "name": "idx_lightrag_doc_status_workspace_updated_at",
+                "sql": "CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_lightrag_doc_status_workspace_updated_at ON LIGHTRAG_DOC_STATUS (workspace, updated_at DESC)",
+                "description": "Index for workspace + updated_at pagination (all statuses)",
+            },
+            {
+                "name": "idx_lightrag_doc_status_workspace_created_at",
+                "sql": "CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_lightrag_doc_status_workspace_created_at ON LIGHTRAG_DOC_STATUS (workspace, created_at DESC)",
+                "description": "Index for workspace + created_at pagination (all statuses)",
+            },
+            {
+                "name": "idx_lightrag_doc_status_workspace_id",
+                "sql": "CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_lightrag_doc_status_workspace_id ON LIGHTRAG_DOC_STATUS (workspace, id)",
+                "description": "Index for workspace + id sorting",
+            },
+            {
+                "name": "idx_lightrag_doc_status_workspace_file_path",
+                "sql": "CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_lightrag_doc_status_workspace_file_path ON LIGHTRAG_DOC_STATUS (workspace, file_path)",
+                "description": "Index for workspace + file_path sorting",
+            },
+        ]
+
+        for index in indexes:
+            try:
+                # Check if index already exists
+                check_sql = """
+                SELECT indexname
+                FROM pg_indexes
+                WHERE tablename = 'lightrag_doc_status'
+                AND indexname = $1
+                """
+
+                existing = await self.query(check_sql, {"indexname": index["name"]})
+
+                if not existing:
+                    logger.info(f"Creating pagination index: {index['description']}")
+                    await self.execute(index["sql"])
+                    logger.info(f"Successfully created index: {index['name']}")
+                else:
+                    logger.debug(f"Index already exists: {index['name']}")
+
+            except Exception as e:
+                logger.warning(f"Failed to create index {index['name']}: {e}")
+
     async def query(
         self,
         sql: str,
@@ -1170,6 +1307,46 @@ class PGKVStorage(BaseKVStorage):
                     processed_results[row["id"]] = row
                 return processed_results
 
+            # For FULL_ENTITIES namespace, parse entity_names JSON string back to list
+            if is_namespace(self.namespace, NameSpace.KV_STORE_FULL_ENTITIES):
+                processed_results = {}
+                for row in results:
+                    entity_names = row.get("entity_names", [])
+                    if isinstance(entity_names, str):
+                        try:
+                            entity_names = json.loads(entity_names)
+                        except json.JSONDecodeError:
+                            entity_names = []
+                    row["entity_names"] = entity_names
+                    create_time = row.get("create_time", 0)
+                    update_time = row.get("update_time", 0)
+                    row["create_time"] = create_time
+                    row["update_time"] = (
+                        create_time if update_time == 0 else update_time
+                    )
+                    processed_results[row["id"]] = row
+                return processed_results
+
+            # For FULL_RELATIONS namespace, parse relation_pairs JSON string back to list
+            if is_namespace(self.namespace, NameSpace.KV_STORE_FULL_RELATIONS):
+                processed_results = {}
+                for row in results:
+                    relation_pairs = row.get("relation_pairs", [])
+                    if isinstance(relation_pairs, str):
+                        try:
+                            relation_pairs = json.loads(relation_pairs)
+                        except json.JSONDecodeError:
+                            relation_pairs = []
+                    row["relation_pairs"] = relation_pairs
+                    create_time = row.get("create_time", 0)
+                    update_time = row.get("update_time", 0)
+                    row["create_time"] = create_time
+                    row["update_time"] = (
+                        create_time if update_time == 0 else update_time
+                    )
+                    processed_results[row["id"]] = row
+                return processed_results
+
             # For other namespaces, return as-is
             return {row["id"]: row for row in results}
         except Exception as e:
@@ -1213,6 +1390,36 @@ class PGKVStorage(BaseKVStorage):
                 "create_time": create_time,
                 "update_time": create_time if update_time == 0 else update_time,
             }
+
+        # Special handling for FULL_ENTITIES namespace
+        if response and is_namespace(self.namespace, NameSpace.KV_STORE_FULL_ENTITIES):
+            # Parse entity_names JSON string back to list
+            entity_names = response.get("entity_names", [])
+            if isinstance(entity_names, str):
+                try:
+                    entity_names = json.loads(entity_names)
+                except json.JSONDecodeError:
+                    entity_names = []
+            response["entity_names"] = entity_names
+            create_time = response.get("create_time", 0)
+            update_time = response.get("update_time", 0)
+            response["create_time"] = create_time
+            response["update_time"] = create_time if update_time == 0 else update_time
+
+        # Special handling for FULL_RELATIONS namespace
+        if response and is_namespace(self.namespace, NameSpace.KV_STORE_FULL_RELATIONS):
+            # Parse relation_pairs JSON string back to list
+            relation_pairs = response.get("relation_pairs", [])
+            if isinstance(relation_pairs, str):
+                try:
+                    relation_pairs = json.loads(relation_pairs)
+                except json.JSONDecodeError:
+                    relation_pairs = []
+            response["relation_pairs"] = relation_pairs
+            create_time = response.get("create_time", 0)
+            update_time = response.get("update_time", 0)
+            response["create_time"] = create_time
+            response["update_time"] = create_time if update_time == 0 else update_time
 
         return response if response else None
 
@@ -1261,6 +1468,38 @@ class PGKVStorage(BaseKVStorage):
                 }
                 processed_results.append(processed_row)
             return processed_results
+
+        # Special handling for FULL_ENTITIES namespace
+        if results and is_namespace(self.namespace, NameSpace.KV_STORE_FULL_ENTITIES):
+            for result in results:
+                # Parse entity_names JSON string back to list
+                entity_names = result.get("entity_names", [])
+                if isinstance(entity_names, str):
+                    try:
+                        entity_names = json.loads(entity_names)
+                    except json.JSONDecodeError:
+                        entity_names = []
+                result["entity_names"] = entity_names
+                create_time = result.get("create_time", 0)
+                update_time = result.get("update_time", 0)
+                result["create_time"] = create_time
+                result["update_time"] = create_time if update_time == 0 else update_time
+
+        # Special handling for FULL_RELATIONS namespace
+        if results and is_namespace(self.namespace, NameSpace.KV_STORE_FULL_RELATIONS):
+            for result in results:
+                # Parse relation_pairs JSON string back to list
+                relation_pairs = result.get("relation_pairs", [])
+                if isinstance(relation_pairs, str):
+                    try:
+                        relation_pairs = json.loads(relation_pairs)
+                    except json.JSONDecodeError:
+                        relation_pairs = []
+                result["relation_pairs"] = relation_pairs
+                create_time = result.get("create_time", 0)
+                update_time = result.get("update_time", 0)
+                result["create_time"] = create_time
+                result["update_time"] = create_time if update_time == 0 else update_time
 
         return results if results else []
 
@@ -1333,6 +1572,34 @@ class PGKVStorage(BaseKVStorage):
                     ),  # Get cache_type from data
                 }
 
+                await self.db.execute(upsert_sql, _data)
+        elif is_namespace(self.namespace, NameSpace.KV_STORE_FULL_ENTITIES):
+            # Get current UTC time and convert to naive datetime for database storage
+            current_time = datetime.datetime.now(timezone.utc).replace(tzinfo=None)
+            for k, v in data.items():
+                upsert_sql = SQL_TEMPLATES["upsert_full_entities"]
+                _data = {
+                    "workspace": self.db.workspace,
+                    "id": k,
+                    "entity_names": json.dumps(v["entity_names"]),
+                    "count": v["count"],
+                    "create_time": current_time,
+                    "update_time": current_time,
+                }
+                await self.db.execute(upsert_sql, _data)
+        elif is_namespace(self.namespace, NameSpace.KV_STORE_FULL_RELATIONS):
+            # Get current UTC time and convert to naive datetime for database storage
+            current_time = datetime.datetime.now(timezone.utc).replace(tzinfo=None)
+            for k, v in data.items():
+                upsert_sql = SQL_TEMPLATES["upsert_full_relations"]
+                _data = {
+                    "workspace": self.db.workspace,
+                    "id": k,
+                    "relation_pairs": json.dumps(v["relation_pairs"]),
+                    "count": v["count"],
+                    "create_time": current_time,
+                    "update_time": current_time,
+                }
                 await self.db.execute(upsert_sql, _data)
 
     async def index_done_callback(self) -> None:
@@ -1913,6 +2180,14 @@ class PGDocStatusStorage(DocStatusStorage):
                     metadata = json.loads(metadata)
                 except json.JSONDecodeError:
                     metadata = {}
+            # Ensure metadata is a dict
+            if not isinstance(metadata, dict):
+                metadata = {}
+
+            # Safe handling for file_path
+            file_path = element.get("file_path")
+            if file_path is None:
+                file_path = "no-file-path"
 
             # Convert datetime objects to ISO format strings with timezone info
             created_at = self._format_datetime_with_timezone(element["created_at"])
@@ -1925,7 +2200,7 @@ class PGDocStatusStorage(DocStatusStorage):
                 created_at=created_at,
                 updated_at=updated_at,
                 chunks_count=element["chunks_count"],
-                file_path=element["file_path"],
+                file_path=file_path,
                 chunks_list=chunks_list,
                 metadata=metadata,
                 error_msg=element.get("error_msg"),
@@ -1959,6 +2234,14 @@ class PGDocStatusStorage(DocStatusStorage):
                     metadata = json.loads(metadata)
                 except json.JSONDecodeError:
                     metadata = {}
+            # Ensure metadata is a dict
+            if not isinstance(metadata, dict):
+                metadata = {}
+
+            # Safe handling for file_path
+            file_path = element.get("file_path")
+            if file_path is None:
+                file_path = "no-file-path"
 
             # Convert datetime objects to ISO format strings with timezone info
             created_at = self._format_datetime_with_timezone(element["created_at"])
@@ -1971,7 +2254,7 @@ class PGDocStatusStorage(DocStatusStorage):
                 created_at=created_at,
                 updated_at=updated_at,
                 chunks_count=element["chunks_count"],
-                file_path=element["file_path"],
+                file_path=file_path,
                 chunks_list=chunks_list,
                 track_id=element.get("track_id"),
                 metadata=metadata,
@@ -1979,6 +2262,141 @@ class PGDocStatusStorage(DocStatusStorage):
             )
 
         return docs_by_track_id
+
+    async def get_docs_paginated(
+        self,
+        status_filter: DocStatus | None = None,
+        page: int = 1,
+        page_size: int = 50,
+        sort_field: str = "updated_at",
+        sort_direction: str = "desc",
+    ) -> tuple[list[tuple[str, DocProcessingStatus]], int]:
+        """Get documents with pagination support
+
+        Args:
+            status_filter: Filter by document status, None for all statuses
+            page: Page number (1-based)
+            page_size: Number of documents per page (10-200)
+            sort_field: Field to sort by ('created_at', 'updated_at', 'id')
+            sort_direction: Sort direction ('asc' or 'desc')
+
+        Returns:
+            Tuple of (list of (doc_id, DocProcessingStatus) tuples, total_count)
+        """
+        # Validate parameters
+        if page < 1:
+            page = 1
+        if page_size < 10:
+            page_size = 10
+        elif page_size > 200:
+            page_size = 200
+
+        if sort_field not in ["created_at", "updated_at", "id", "file_path"]:
+            sort_field = "updated_at"
+
+        if sort_direction.lower() not in ["asc", "desc"]:
+            sort_direction = "desc"
+
+        # Calculate offset
+        offset = (page - 1) * page_size
+
+        # Build WHERE clause
+        where_clause = "WHERE workspace=$1"
+        params = {"workspace": self.db.workspace}
+        param_count = 1
+
+        if status_filter is not None:
+            param_count += 1
+            where_clause += f" AND status=${param_count}"
+            params["status"] = status_filter.value
+
+        # Build ORDER BY clause
+        order_clause = f"ORDER BY {sort_field} {sort_direction.upper()}"
+
+        # Query for total count
+        count_sql = f"SELECT COUNT(*) as total FROM LIGHTRAG_DOC_STATUS {where_clause}"
+        count_result = await self.db.query(count_sql, params)
+        total_count = count_result["total"] if count_result else 0
+
+        # Query for paginated data
+        data_sql = f"""
+            SELECT * FROM LIGHTRAG_DOC_STATUS
+            {where_clause}
+            {order_clause}
+            LIMIT ${param_count + 1} OFFSET ${param_count + 2}
+        """
+        params["limit"] = page_size
+        params["offset"] = offset
+
+        result = await self.db.query(data_sql, params, True)
+
+        # Convert to (doc_id, DocProcessingStatus) tuples
+        documents = []
+        for element in result:
+            doc_id = element["id"]
+
+            # Parse chunks_list JSON string back to list
+            chunks_list = element.get("chunks_list", [])
+            if isinstance(chunks_list, str):
+                try:
+                    chunks_list = json.loads(chunks_list)
+                except json.JSONDecodeError:
+                    chunks_list = []
+
+            # Parse metadata JSON string back to dict
+            metadata = element.get("metadata", {})
+            if isinstance(metadata, str):
+                try:
+                    metadata = json.loads(metadata)
+                except json.JSONDecodeError:
+                    metadata = {}
+
+            # Convert datetime objects to ISO format strings with timezone info
+            created_at = self._format_datetime_with_timezone(element["created_at"])
+            updated_at = self._format_datetime_with_timezone(element["updated_at"])
+
+            doc_status = DocProcessingStatus(
+                content_summary=element["content_summary"],
+                content_length=element["content_length"],
+                status=element["status"],
+                created_at=created_at,
+                updated_at=updated_at,
+                chunks_count=element["chunks_count"],
+                file_path=element["file_path"],
+                chunks_list=chunks_list,
+                track_id=element.get("track_id"),
+                metadata=metadata,
+                error_msg=element.get("error_msg"),
+            )
+            documents.append((doc_id, doc_status))
+
+        return documents, total_count
+
+    async def get_all_status_counts(self) -> dict[str, int]:
+        """Get counts of documents in each status for all documents
+
+        Returns:
+            Dictionary mapping status names to counts, including 'all' field
+        """
+        sql = """
+            SELECT status, COUNT(*) as count
+            FROM LIGHTRAG_DOC_STATUS
+            WHERE workspace=$1
+            GROUP BY status
+        """
+        params = {"workspace": self.db.workspace}
+        result = await self.db.query(sql, params, True)
+
+        counts = {}
+        total_count = 0
+        for row in result:
+            counts[row["status"]] = row["count"]
+            total_count += row["count"]
+
+        # Add 'all' field with total count
+        counts["all"] = total_count
+
+        return counts
 
     async def index_done_callback(self) -> None:
         # PG handles persistence automatically
@@ -3075,7 +3493,7 @@ class PGGraphStorage(BaseGraphStorage):
         query = f"""
             SELECT * FROM cypher('{self.graph_name}', $$
                 UNWIND {chunk_ids_str} AS chunk_id
-                MATCH (a:base)-[r]-(b:base)
+                MATCH ()-[r]-()
                 WHERE r.source_id IS NOT NULL AND chunk_id IN split(r.source_id, '{GRAPH_FIELD_SEP}')
                 RETURN DISTINCT r, startNode(r) AS source, endNode(r) AS target
             $$) AS (edge agtype, source agtype, target agtype);
@@ -3455,6 +3873,67 @@ class PGGraphStorage(BaseGraphStorage):
 
         return kg
 
+    async def get_all_nodes(self) -> list[dict]:
+        """Get all nodes in the graph.
+
+        Returns:
+            A list of all nodes, where each node is a dictionary of its properties
+        """
+        query = f"""SELECT * FROM cypher('{self.graph_name}', $$
+                     MATCH (n:base)
+                     RETURN n
+                   $$) AS (n agtype)"""
+
+        results = await self._query(query)
+        nodes = []
+        for result in results:
+            if result["n"]:
+                node_dict = result["n"]["properties"]
+
+                # Process string result, parse it to JSON dictionary
+                if isinstance(node_dict, str):
+                    try:
+                        node_dict = json.loads(node_dict)
+                    except json.JSONDecodeError:
+                        logger.warning(f"Failed to parse node string: {node_dict}")
+
+                # Add node id (entity_id) to the dictionary for easier access
+                node_dict["id"] = node_dict.get("entity_id")
+                nodes.append(node_dict)
+        return nodes
+
+    async def get_all_edges(self) -> list[dict]:
+        """Get all edges in the graph.
+
+        Returns:
+            A list of all edges, where each edge is a dictionary of its properties
+            (The edge is bidirectional; deduplication must be handled by the caller)
+        """
+        query = f"""SELECT * FROM cypher('{self.graph_name}', $$
+                     MATCH (a:base)-[r]-(b:base)
+                     RETURN DISTINCT a.entity_id AS source, b.entity_id AS target, properties(r) AS properties
+                   $$) AS (source text, target text, properties agtype)"""
+
+        results = await self._query(query)
+        edges = []
+        for result in results:
+            edge_properties = result["properties"]
+
+            # Process string result, parse it to JSON dictionary
+            if isinstance(edge_properties, str):
+                try:
+                    edge_properties = json.loads(edge_properties)
+                except json.JSONDecodeError:
+                    logger.warning(
+                        f"Failed to parse edge properties string: {edge_properties}"
+                    )
+                    edge_properties = {}
+
+            edge_properties["source"] = result["source"]
+            edge_properties["target"] = result["target"]
+            edges.append(edge_properties)
+        return edges
+
     async def drop(self) -> dict[str, str]:
         """Drop the storage"""
         try:
@@ -3473,14 +3952,18 @@ class PGGraphStorage(BaseGraphStorage):
             return {"status": "error", "message": str(e)}
 
 
+# Note: Order matters! More specific namespaces (e.g., "full_entities") must come before
+# more general ones (e.g., "entities") because is_namespace() uses endswith() matching
 NAMESPACE_TABLE_MAP = {
     NameSpace.KV_STORE_FULL_DOCS: "LIGHTRAG_DOC_FULL",
     NameSpace.KV_STORE_TEXT_CHUNKS: "LIGHTRAG_DOC_CHUNKS",
+    NameSpace.KV_STORE_FULL_ENTITIES: "LIGHTRAG_FULL_ENTITIES",
+    NameSpace.KV_STORE_FULL_RELATIONS: "LIGHTRAG_FULL_RELATIONS",
+    NameSpace.KV_STORE_LLM_RESPONSE_CACHE: "LIGHTRAG_LLM_CACHE",
     NameSpace.VECTOR_STORE_CHUNKS: "LIGHTRAG_VDB_CHUNKS",
     NameSpace.VECTOR_STORE_ENTITIES: "LIGHTRAG_VDB_ENTITY",
     NameSpace.VECTOR_STORE_RELATIONSHIPS: "LIGHTRAG_VDB_RELATION",
     NameSpace.DOC_STATUS: "LIGHTRAG_DOC_STATUS",
-    NameSpace.KV_STORE_LLM_RESPONSE_CACHE: "LIGHTRAG_LLM_CACHE",
 }
 
 
@@ -3593,6 +4076,28 @@ TABLES = {
 	               CONSTRAINT LIGHTRAG_DOC_STATUS_PK PRIMARY KEY (workspace, id)
 	              )"""
     },
+    "LIGHTRAG_FULL_ENTITIES": {
+        "ddl": """CREATE TABLE LIGHTRAG_FULL_ENTITIES (
+                    id VARCHAR(255),
+                    workspace VARCHAR(255),
+                    entity_names JSONB,
+                    count INTEGER,
+                    create_time TIMESTAMP(0) DEFAULT CURRENT_TIMESTAMP,
+                    update_time TIMESTAMP(0) DEFAULT CURRENT_TIMESTAMP,
+                    CONSTRAINT LIGHTRAG_FULL_ENTITIES_PK PRIMARY KEY (workspace, id)
+                    )"""
+    },
+    "LIGHTRAG_FULL_RELATIONS": {
+        "ddl": """CREATE TABLE LIGHTRAG_FULL_RELATIONS (
+                    id VARCHAR(255),
+                    workspace VARCHAR(255),
+                    relation_pairs JSONB,
+                    count INTEGER,
+                    create_time TIMESTAMP(0) DEFAULT CURRENT_TIMESTAMP,
+                    update_time TIMESTAMP(0) DEFAULT CURRENT_TIMESTAMP,
+                    CONSTRAINT LIGHTRAG_FULL_RELATIONS_PK PRIMARY KEY (workspace, id)
+                    )"""
+    },
 }
 
 
@@ -3631,6 +4136,26 @@ SQL_TEMPLATES = {
                                  EXTRACT(EPOCH FROM update_time)::BIGINT as update_time
                                  FROM LIGHTRAG_LLM_CACHE WHERE workspace=$1 AND id IN ({ids})
                                 """,
+    "get_by_id_full_entities": """SELECT id, entity_names, count,
+                                EXTRACT(EPOCH FROM create_time)::BIGINT as create_time,
+                                EXTRACT(EPOCH FROM update_time)::BIGINT as update_time
+                                FROM LIGHTRAG_FULL_ENTITIES WHERE workspace=$1 AND id=$2
+                               """,
+    "get_by_id_full_relations": """SELECT id, relation_pairs, count,
+                                EXTRACT(EPOCH FROM create_time)::BIGINT as create_time,
+                                EXTRACT(EPOCH FROM update_time)::BIGINT as update_time
+                                FROM LIGHTRAG_FULL_RELATIONS WHERE workspace=$1 AND id=$2
+                               """,
+    "get_by_ids_full_entities": """SELECT id, entity_names, count,
+                                 EXTRACT(EPOCH FROM create_time)::BIGINT as create_time,
+                                 EXTRACT(EPOCH FROM update_time)::BIGINT as update_time
+                                 FROM LIGHTRAG_FULL_ENTITIES WHERE workspace=$1 AND id IN ({ids})
+                                """,
+    "get_by_ids_full_relations": """SELECT id, relation_pairs, count,
+                                 EXTRACT(EPOCH FROM create_time)::BIGINT as create_time,
+                                 EXTRACT(EPOCH FROM update_time)::BIGINT as update_time
+                                 FROM LIGHTRAG_FULL_RELATIONS WHERE workspace=$1 AND id IN ({ids})
+                                """,
     "filter_keys": "SELECT id FROM {table_name} WHERE workspace=$1 AND id IN ({ids})",
     "upsert_doc_full": """INSERT INTO LIGHTRAG_DOC_FULL (id, content, workspace)
                         VALUES ($1, $2, $3)
@@ -3658,6 +4183,22 @@ SQL_TEMPLATES = {
                       content = EXCLUDED.content,
                       file_path=EXCLUDED.file_path,
                       llm_cache_list=EXCLUDED.llm_cache_list,
+                      update_time = EXCLUDED.update_time
+                     """,
+    "upsert_full_entities": """INSERT INTO LIGHTRAG_FULL_ENTITIES (workspace, id, entity_names, count,
+                      create_time, update_time)
+                      VALUES ($1, $2, $3, $4, $5, $6)
+                      ON CONFLICT (workspace,id) DO UPDATE
+                      SET entity_names=EXCLUDED.entity_names,
+                      count=EXCLUDED.count,
+                      update_time = EXCLUDED.update_time
+                     """,
+    "upsert_full_relations": """INSERT INTO LIGHTRAG_FULL_RELATIONS (workspace, id, relation_pairs, count,
+                      create_time, update_time)
+                      VALUES ($1, $2, $3, $4, $5, $6)
+                      ON CONFLICT (workspace,id) DO UPDATE
+                      SET relation_pairs=EXCLUDED.relation_pairs,
+                      count=EXCLUDED.count,
                       update_time = EXCLUDED.update_time
                      """,
     # SQL for VectorStorage
