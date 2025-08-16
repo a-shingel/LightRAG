@@ -1,30 +1,31 @@
 from __future__ import annotations
-import weakref
 
 import asyncio
-import html
 import csv
+import html
 import json
 import logging
 import logging.handlers
 import os
 import re
 import uuid
+import weakref
 from dataclasses import dataclass
 from datetime import datetime
 from functools import wraps
 from hashlib import md5
-from typing import Any, Protocol, Callable, TYPE_CHECKING, List
+from typing import TYPE_CHECKING, Any, Callable, List, Protocol
+
 import numpy as np
 from dotenv import load_dotenv
 
 from lightrag.constants import (
-    DEFAULT_LOG_MAX_BYTES,
     DEFAULT_LOG_BACKUP_COUNT,
     DEFAULT_LOG_FILENAME,
-    GRAPH_FIELD_SEP,
-    DEFAULT_MAX_TOTAL_TOKENS,
+    DEFAULT_LOG_MAX_BYTES,
     DEFAULT_MAX_FILE_PATH_LENGTH,
+    DEFAULT_MAX_TOTAL_TOKENS,
+    GRAPH_FIELD_SEP,
 )
 
 # Global import for pypinyin with startup-time logging
@@ -625,8 +626,27 @@ def load_json(file_name):
 
 
 def write_json(json_obj, file_name):
-    with open(file_name, "w", encoding="utf-8") as f:
-        json.dump(json_obj, f, indent=2, ensure_ascii=False)
+    # Atomic write: write to temp file, flush+fsync, then replace
+    import os
+    import tempfile
+
+    dir_name = os.path.dirname(file_name) or "."
+    base_name = os.path.basename(file_name)
+    fd, tmp_path = tempfile.mkstemp(prefix=base_name + ".", suffix=".tmp", dir=dir_name)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            json.dump(json_obj, f, indent=2, ensure_ascii=False)
+            f.flush()
+            os.fsync(f.fileno())
+        # On same filesystem, replace is atomic
+        os.replace(tmp_path, file_name)
+    except Exception:
+        try:
+            if os.path.exists(tmp_path):
+                os.remove(tmp_path)
+        except Exception:
+            pass
+        raise
 
 
 class TokenizerInterface(Protocol):
