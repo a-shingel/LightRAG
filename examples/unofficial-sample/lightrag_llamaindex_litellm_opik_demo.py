@@ -2,6 +2,7 @@ from lightrag.kg.shared_storage import initialize_pipeline_status
 import os
 from lightrag import LightRAG, QueryParam
 from lightrag.llm.llama_index_impl import (
+from lightrag.kg.shared_storage import initialize_pipeline_status
     llama_index_complete_if_cache,
     llama_index_embed,
 )
