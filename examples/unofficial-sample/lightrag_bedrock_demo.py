@@ -1,3 +1,5 @@
+from lightrag.kg.shared_storage import initialize_pipeline_status
+
 """
 LightRAG meets Amazon Bedrock ⛰️
 """
