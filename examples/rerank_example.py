@@ -224,7 +224,7 @@ async def test_direct_rerank():
         for i, doc in enumerate(reranked_docs):
             score = doc.get("rerank_score", "N/A")
             content = doc.get("content", "")[:60]
-            print(f"  {i+1}. Score: {score:.4f} | {content}...")
+            print(f"  {i + 1}. Score: {score:.4f} | {content}...")
 
     except Exception as e:
         print(f"❌ Rerank failed: {e}")

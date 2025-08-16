@@ -1,3 +1,4 @@
+from lightrag.kg.shared_storage import initialize_pipeline_status
 import os
 from lightrag import LightRAG, QueryParam
 from lightrag.llm.llama_index_impl import (
@@ -12,7 +13,6 @@ import nest_asyncio
 
 nest_asyncio.apply()
 
-from lightrag.kg.shared_storage import initialize_pipeline_status
 
 # Configure working directory
 WORKING_DIR = "./index_default"

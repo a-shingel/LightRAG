@@ -2,13 +2,14 @@
 LightRAG meets Amazon Bedrock ⛰️
 """
 
+from lightrag.kg.shared_storage import initialize_pipeline_status
+
 import os
 import logging
 
 from lightrag import LightRAG, QueryParam
 from lightrag.llm.bedrock import bedrock_complete, bedrock_embed
 from lightrag.utils import EmbeddingFunc
-from lightrag.kg.shared_storage import initialize_pipeline_status
 
 import asyncio
 import nest_asyncio
