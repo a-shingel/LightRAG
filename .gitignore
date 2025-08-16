@@ -74,3 +74,4 @@ test_*
 # Cline files
 memory-bank
 memory-bank/
+.clinerules
