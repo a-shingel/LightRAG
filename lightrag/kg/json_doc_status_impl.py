@@ -1,5 +1,5 @@
-from dataclasses import dataclass
 import os
+from dataclasses import dataclass
 from typing import Any, Union, final
 
 from lightrag.base import (
@@ -8,18 +8,19 @@ from lightrag.base import (
     DocStatusStorage,
 )
 from lightrag.utils import (
+    get_pinyin_sort_key,
     load_json,
     logger,
     write_json,
-    get_pinyin_sort_key,
 )
+
 from .shared_storage import (
+    clear_all_update_flags,
+    get_data_init_lock,
     get_namespace_data,
     get_storage_lock,
-    get_data_init_lock,
     get_update_flag,
     set_all_update_flags,
-    clear_all_update_flags,
     try_initialize_namespace,
 )
 
@@ -64,9 +65,47 @@ class JsonDocStatusStorage(DocStatusStorage):
                     )
 
     async def filter_keys(self, keys: set[str]) -> set[str]:
-        """Return keys that should be processed (not in storage or not successfully processed)"""
+        """Return keys that should be processed (missing OR not fully processed).
+
+        A document is considered fully processed only when:
+        - status == PROCESSED
+        - chunks_count > 0
+        - multimodal_processed is True
+
+        Any other state (including records created as a baseline with zero chunks)
+        should be reprocessed to recover from partial/failed ingestion.
+        """
         async with self._storage_lock:
-            return set(keys) - set(self._data.keys())
+            processable: set[str] = set()
+            for key in keys:
+                entry = self._data.get(key)
+                if not entry:
+                    processable.add(key)
+                    continue
+
+                try:
+                    status_str = str(entry.get("status", "")).upper()
+                    chunks_count = int(entry.get("chunks_count", 0) or 0)
+                    multimodal_processed = bool(
+                        entry.get("multimodal_processed", False)
+                    )
+                except Exception:
+                    # If entry is malformed, allow reprocessing
+                    processable.add(key)
+                    continue
+
+                # Skip only when fully processed with non-zero chunks and multimodal complete
+                if (
+                    status_str == DocStatus.PROCESSED.value
+                    and chunks_count > 0
+                    and multimodal_processed
+                ):
+                    continue
+
+                # Otherwise, schedule for (re)processing
+                processable.add(key)
+
+            return processable
 
     async def get_by_ids(self, ids: list[str]) -> list[dict[str, Any]]:
         result: list[dict[str, Any]] = []
