@@ -1727,6 +1727,9 @@ async def kg_query(
     system_prompt: str | None = None,
     chunks_vdb: BaseVectorStorage = None,
 ) -> str | AsyncIterator[str]:
+    if not query:
+        return PROMPTS["fail_response"]
+
     if query_param.model_func:
         use_model_func = query_param.model_func
     else:
@@ -1763,21 +1766,16 @@ async def kg_query(
     logger.debug(f"Low-level  keywords: {ll_keywords}")
 
     # Handle empty keywords
+    if ll_keywords == [] and query_param.mode in ["local", "hybrid", "mix"]:
+        logger.warning("low_level_keywords is empty")
+    if hl_keywords == [] and query_param.mode in ["global", "hybrid", "mix"]:
+        logger.warning("high_level_keywords is empty")
     if hl_keywords == [] and ll_keywords == []:
-        logger.warning("low_level_keywords and high_level_keywords is empty")
-        return PROMPTS["fail_response"]
-    if ll_keywords == [] and query_param.mode in ["local", "hybrid"]:
-        logger.warning(
-            "low_level_keywords is empty, switching from %s mode to global mode",
-            query_param.mode,
-        )
-        query_param.mode = "global"
-    if hl_keywords == [] and query_param.mode in ["global", "hybrid"]:
-        logger.warning(
-            "high_level_keywords is empty, switching from %s mode to local mode",
-            query_param.mode,
-        )
-        query_param.mode = "local"
+        if len(query) < 50:
+            logger.warning(f"Forced low_level_keywords to origin query: {query}")
+            ll_keywords = [query]
+        else:
+            return PROMPTS["fail_response"]
 
     ll_keywords_str = ", ".join(ll_keywords) if ll_keywords else ""
     hl_keywords_str = ", ".join(hl_keywords) if hl_keywords else ""
@@ -2112,8 +2110,28 @@ async def _build_query_context(
     # Track chunk sources and metadata for final logging
     chunk_tracking = {}  # chunk_id -> {source, frequency, order}
 
+    # Pre-compute query embedding if vector similarity method is used
+    kg_chunk_pick_method = text_chunks_db.global_config.get(
+        "kg_chunk_pick_method", DEFAULT_KG_CHUNK_PICK_METHOD
+    )
+    query_embedding = None
+    if kg_chunk_pick_method == "VECTOR" and query and chunks_vdb:
+        embedding_func_config = text_chunks_db.embedding_func
+        if embedding_func_config and embedding_func_config.func:
+            try:
+                query_embedding = await embedding_func_config.func([query])
+                query_embedding = query_embedding[
+                    0
+                ]  # Extract first embedding from batch result
+                logger.debug(
+                    "Pre-computed query embedding for vector similarity chunk selection"
+                )
+            except Exception as e:
+                logger.warning(f"Failed to pre-compute query embedding: {e}")
+                query_embedding = None
+
     # Handle local and global modes
-    if query_param.mode == "local":
+    if query_param.mode == "local" and len(ll_keywords) > 0:
         local_entities, local_relations = await _get_node_data(
             ll_keywords,
             knowledge_graph_inst,
@@ -2121,7 +2139,7 @@ async def _build_query_context(
             query_param,
         )
 
-    elif query_param.mode == "global":
+    elif query_param.mode == "global" and len(hl_keywords) > 0:
         global_relations, global_entities = await _get_edge_data(
             hl_keywords,
             knowledge_graph_inst,
@@ -2130,18 +2148,20 @@ async def _build_query_context(
         )
 
     else:  # hybrid or mix mode
-        local_entities, local_relations = await _get_node_data(
-            ll_keywords,
-            knowledge_graph_inst,
-            entities_vdb,
-            query_param,
-        )
-        global_relations, global_entities = await _get_edge_data(
-            hl_keywords,
-            knowledge_graph_inst,
-            relationships_vdb,
-            query_param,
-        )
+        if len(ll_keywords) > 0:
+            local_entities, local_relations = await _get_node_data(
+                ll_keywords,
+                knowledge_graph_inst,
+                entities_vdb,
+                query_param,
+            )
+        if len(hl_keywords) > 0:
+            global_relations, global_entities = await _get_edge_data(
+                hl_keywords,
+                knowledge_graph_inst,
+                relationships_vdb,
+                query_param,
+            )
 
         # Get vector chunks first if in mix mode
         if query_param.mode == "mix" and chunks_vdb:
@@ -2372,6 +2392,7 @@ async def _build_query_context(
             query,
             chunks_vdb,
             chunk_tracking=chunk_tracking,
+            query_embedding=query_embedding,
         )
 
     # Find deduplcicated chunks from edge
@@ -2385,6 +2406,7 @@ async def _build_query_context(
             query,
             chunks_vdb,
             chunk_tracking=chunk_tracking,
+            query_embedding=query_embedding,
         )
 
     # Round-robin merge chunks from different sources with deduplication by chunk_id
@@ -2719,6 +2741,7 @@ async def _find_related_text_unit_from_entities(
     query: str = None,
     chunks_vdb: BaseVectorStorage = None,
     chunk_tracking: dict = None,
+    query_embedding=None,
 ):
     """
     Find text chunks related to entities using configurable chunk selection method.
@@ -2814,6 +2837,7 @@ async def _find_related_text_unit_from_entities(
                         num_of_chunks=num_of_chunks,
                         entity_info=entities_with_chunks,
                         embedding_func=actual_embedding_func,
+                        query_embedding=query_embedding,
                     )
 
                 if selected_chunk_ids == []:
@@ -2971,6 +2995,7 @@ async def _find_related_text_unit_from_relations(
     query: str = None,
     chunks_vdb: BaseVectorStorage = None,
     chunk_tracking: dict = None,
+    query_embedding=None,
 ):
     """
     Find text chunks related to relationships using configurable chunk selection method.
@@ -3106,6 +3131,7 @@ async def _find_related_text_unit_from_relations(
                         num_of_chunks=num_of_chunks,
                         entity_info=relations_with_chunks,
                         embedding_func=actual_embedding_func,
+                        query_embedding=query_embedding,
                     )
 
                 if selected_chunk_ids == []:

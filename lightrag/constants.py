@@ -14,7 +14,7 @@ DEFAULT_MAX_GRAPH_NODES = 1000
 DEFAULT_SUMMARY_LANGUAGE = "English"  # Default language for summaries
 DEFAULT_FORCE_LLM_SUMMARY_ON_MERGE = 4
 DEFAULT_MAX_GLEANING = 1
-DEFAULT_SUMMARY_MAX_TOKENS = 10000  # Default maximum token size
+DEFAULT_SUMMARY_MAX_TOKENS = 30000  # Default maximum token size
 
 # Separator for graph fields
 GRAPH_FIELD_SEP = "<SEP>"
@@ -32,8 +32,8 @@ DEFAULT_KG_CHUNK_PICK_METHOD = "VECTOR"
 DEFAULT_HISTORY_TURNS = 0
 
 # Rerank configuration defaults
-DEFAULT_ENABLE_RERANK = True
 DEFAULT_MIN_RERANK_SCORE = 0.0
+DEFAULT_RERANK_BINDING = "null"
 
 # File path configuration for vector and graph database(Should not be changed, used in Milvus Schema)
 DEFAULT_MAX_FILE_PATH_LENGTH = 32768
@@ -49,7 +49,7 @@ DEFAULT_MAX_PARALLEL_INSERT = 2  # Default maximum parallel insert operations
 DEFAULT_EMBEDDING_FUNC_MAX_ASYNC = 8  # Default max async for embedding functions
 DEFAULT_EMBEDDING_BATCH_NUM = 10  # Default batch size for embedding computations
 
-# Ollama Server Timetout in seconds
+# gunicorn worker timeout(as default LLM request timeout if LLM_TIMEOUT is not set)
 DEFAULT_TIMEOUT = 150
 
 # Logging configuration defaults

@@ -85,7 +85,7 @@ from .utils import (
     lazy_external_import,
     priority_limit_async_func_call,
     get_content_summary,
-    clean_text,
+    sanitize_text_for_encoding,
     check_storage_env_vars,
     generate_track_id,
     logger,
@@ -283,7 +283,7 @@ class LightRAG:
     """Name of the LLM model used for generating responses."""
 
     summary_max_tokens: int = field(
-        default=int(os.getenv("MAX_TOKENS", DEFAULT_SUMMARY_MAX_TOKENS))
+        default=int(os.getenv("SUMMARY_MAX_TOKENS", DEFAULT_SUMMARY_MAX_TOKENS))
     )
     """Maximum number of tokens allowed per LLM response."""
 
@@ -524,14 +524,6 @@ class LightRAG:
                 **self.llm_model_kwargs,
             )
         )
-
-        # Init Rerank
-        if self.rerank_model_func:
-            logger.info("Rerank model initialized for improved retrieval quality")
-        else:
-            logger.warning(
-                "Rerank is enabled but no rerank_model_func provided. Reranking will be skipped."
-            )
 
         self._storages_status = StoragesStatus.CREATED
 
@@ -908,8 +900,8 @@ class LightRAG:
         update_storage = False
         try:
             # Clean input texts
-            full_text = clean_text(full_text)
-            text_chunks = [clean_text(chunk) for chunk in text_chunks]
+            full_text = sanitize_text_for_encoding(full_text)
+            text_chunks = [sanitize_text_for_encoding(chunk) for chunk in text_chunks]
             file_path = ""
 
             # Process cleaned texts
@@ -1020,7 +1012,7 @@ class LightRAG:
             # Generate contents dict and remove duplicates in one pass
             unique_contents = {}
             for id_, doc, path in zip(ids, input, file_paths):
-                cleaned_content = clean_text(doc)
+                cleaned_content = sanitize_text_for_encoding(doc)
                 if cleaned_content not in unique_contents:
                     unique_contents[cleaned_content] = (id_, path)
 
@@ -1033,7 +1025,7 @@ class LightRAG:
             # Clean input text and remove duplicates in one pass
             unique_content_with_paths = {}
             for doc, path in zip(input, file_paths):
-                cleaned_content = clean_text(doc)
+                cleaned_content = sanitize_text_for_encoding(doc)
                 if cleaned_content not in unique_content_with_paths:
                     unique_content_with_paths[cleaned_content] = path
 
@@ -1626,9 +1618,7 @@ class LightRAG:
                                         doc_id: {
                                             "status": DocStatus.PROCESSED,
                                             "chunks_count": len(chunks),
-                                            "chunks_list": list(
-                                                chunks.keys()
-                                            ),  # 保留 chunks_list
+                                            "chunks_list": list(chunks.keys()),
                                             "content_summary": status_doc.content_summary,
                                             "content_length": status_doc.content_length,
                                             "created_at": status_doc.created_at,
@@ -1819,7 +1809,7 @@ class LightRAG:
             all_chunks_data: dict[str, dict[str, str]] = {}
             chunk_to_source_map: dict[str, str] = {}
             for chunk_data in custom_kg.get("chunks", []):
-                chunk_content = clean_text(chunk_data["content"])
+                chunk_content = sanitize_text_for_encoding(chunk_data["content"])
                 source_id = chunk_data["source_id"]
                 file_path = chunk_data.get("file_path", "custom_kg")
                 tokens = len(self.tokenizer.encode(chunk_content))
@@ -2221,16 +2211,20 @@ class LightRAG:
             doc_status = doc_status_data.get("status")
             if doc_status != DocStatus.PROCESSED:
                 if doc_status == DocStatus.PENDING:
-                    warning_msg = f"WARNING: Deleting {doc_id} {file_path}(previous status: PENDING)"
+                    warning_msg = (
+                        f"Deleting {doc_id} {file_path}(previous status: PENDING)"
+                    )
                 elif doc_status == DocStatus.PROCESSING:
-                    warning_msg = f"WARNING: Deleting {doc_id} {file_path}(previous status: PROCESSING)"
+                    warning_msg = (
+                        f"Deleting {doc_id} {file_path}(previous status: PROCESSING)"
+                    )
                 elif doc_status == DocStatus.FAILED:
-                    warning_msg = f"WARNING: Deleting {doc_id} {file_path}(previous status: FAILED)"
+                    warning_msg = (
+                        f"Deleting {doc_id} {file_path}(previous status: FAILED)"
+                    )
                 else:
-                    warning_msg = f"WARNING: Deleting {doc_id} {file_path}(previous status: {doc_status.value})"
-
-                logger.warning(warning_msg)
-
+                    warning_msg = f"Deleting {doc_id} {file_path}(previous status: {doc_status.value})"
+                logger.info(warning_msg)
                 # Update pipeline status for monitoring
                 async with pipeline_status_lock:
                     pipeline_status["latest_message"] = warning_msg
@@ -2247,7 +2241,6 @@ class LightRAG:
                     # Still need to delete the doc status and full doc
                     await self.full_docs.delete([doc_id])
                     await self.doc_status.delete([doc_id])
-                    logger.info(f"Deleted document {doc_id} with no associated chunks")
                 except Exception as e:
                     logger.error(
                         f"Failed to delete document {doc_id} with no chunks: {e}"
@@ -2256,7 +2249,7 @@ class LightRAG:
 
                 async with pipeline_status_lock:
                     log_message = (
-                        f"Document {doc_id} is deleted without associated chunks."
+                        f"Document deleted without associated chunks: {doc_id}"
                     )
                     logger.info(log_message)
                     pipeline_status["latest_message"] = log_message
