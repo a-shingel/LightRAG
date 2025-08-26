@@ -1,56 +1,57 @@
 from __future__ import annotations
-from functools import partial
 
 import asyncio
 import json
-import re
 import os
-import json_repair
-from typing import Any, AsyncIterator
+import re
+import time
 from collections import Counter, defaultdict
+from functools import partial
+from typing import Any, AsyncIterator
 
-from .utils import (
-    logger,
-    clean_str,
-    compute_mdhash_id,
-    Tokenizer,
-    is_float_regex,
-    normalize_extracted_info,
-    pack_user_ass_to_openai_messages,
-    split_string_by_multi_markers,
-    truncate_list_by_token_size,
-    compute_args_hash,
-    handle_cache,
-    save_to_cache,
-    CacheData,
-    get_conversation_turns,
-    use_llm_func_with_cache,
-    update_chunk_cache_list,
-    remove_think_tags,
-    pick_by_weighted_polling,
-    pick_by_vector_similarity,
-    process_chunks_unified,
-    build_file_path,
-)
+import json_repair
+from dotenv import load_dotenv
+
 from .base import (
     BaseGraphStorage,
     BaseKVStorage,
     BaseVectorStorage,
-    TextChunkSchema,
     QueryParam,
+    TextChunkSchema,
 )
-from .prompt import PROMPTS
 from .constants import (
-    GRAPH_FIELD_SEP,
+    DEFAULT_KG_CHUNK_PICK_METHOD,
     DEFAULT_MAX_ENTITY_TOKENS,
     DEFAULT_MAX_RELATION_TOKENS,
     DEFAULT_MAX_TOTAL_TOKENS,
     DEFAULT_RELATED_CHUNK_NUMBER,
-    DEFAULT_KG_CHUNK_PICK_METHOD,
+    GRAPH_FIELD_SEP,
 )
 from .kg.shared_storage import get_storage_keyed_lock
-import time
-from dotenv import load_dotenv
+from .prompt import PROMPTS
+from .utils import (
+    CacheData,
+    Tokenizer,
+    build_file_path,
+    clean_str,
+    compute_args_hash,
+    compute_mdhash_id,
+    get_conversation_turns,
+    handle_cache,
+    is_float_regex,
+    logger,
+    normalize_extracted_info,
+    pack_user_ass_to_openai_messages,
+    pick_by_vector_similarity,
+    pick_by_weighted_polling,
+    process_chunks_unified,
+    remove_think_tags,
+    save_to_cache,
+    split_string_by_multi_markers,
+    truncate_list_by_token_size,
+    update_chunk_cache_list,
+    use_llm_func_with_cache,
+)
 
 # use the .env that is inside the current folder
 # allows to use different .env file for each lightrag instance
@@ -1092,8 +1093,71 @@ async def _merge_edges_then_upsert(
             all_keywords.update(
                 k.strip() for k in edge["keywords"].split(",") if k.strip()
             )
-    # Join all unique keywords with commas
-    keywords = ",".join(sorted(all_keywords))
+    # Normalize relationship keywords to a fixed canonical set
+    canonical_set = {
+        "defines",
+        "implements",
+        "depends_on",
+        "uses",
+        "calls",
+        "imports",
+        "extends",
+        "composes",
+        "owned_by",
+        "authored_by",
+        "assigned_to",
+        "relates_to",
+        "blocks",
+        "blocked_by",
+        "tests",
+        "fixes",
+    }
+
+    synonym_map = {
+        "define": "defines",
+        "implementation": "implements",
+        "depends": "depends_on",
+        "require": "depends_on",
+        "required_by": "blocked_by",
+        "use": "uses",
+        "invoke": "calls",
+        "call": "calls",
+        "include": "imports",
+        "import": "imports",
+        "inherit": "extends",
+        "compose": "composes",
+        "owner": "owned_by",
+        "author": "authored_by",
+        "assign": "assigned_to",
+        "relate": "relates_to",
+        "block": "blocks",
+        "blocked": "blocked_by",
+        "test": "tests",
+        "verify": "tests",
+        "cover": "tests",
+        "fix": "fixes",
+        "resolve": "fixes",
+        "patch": "fixes",
+        "reference": "relates_to",
+        "references": "relates_to",
+        "describes": "defines",
+        "specifies": "defines",
+    }
+
+    normalized = set()
+    for k in list(all_keywords):
+        key = k.strip().lower()
+        if not key:
+            continue
+        key = synonym_map.get(key, key)
+        if key in canonical_set:
+            normalized.add(key)
+
+    if not normalized:
+        normalized = {"relates_to"}
+
+    # Join canonical keywords with commas
+    keywords = ",".join(sorted(normalized))
 
     source_id = GRAPH_FIELD_SEP.join(
         set(

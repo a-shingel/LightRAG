@@ -1,6 +1,6 @@
 from __future__ import annotations
-from typing import Any
 
+from typing import Any
 
 PROMPTS: dict[str, Any] = {}
 
@@ -32,6 +32,7 @@ For each pair of related entities, extract the following information:
 - relationship_strength: a numeric score indicating strength of the relationship between the source entity and target entity
 - relationship_keywords: one or more high-level key words that summarize the overarching nature of the relationship, focusing on concepts or themes rather than specific details
 Format each relationship as ("relationship"{tuple_delimiter}<source_entity>{tuple_delimiter}<target_entity>{tuple_delimiter}<relationship_description>{tuple_delimiter}<relationship_keywords>{tuple_delimiter}<relationship_strength>)
+Use ONLY the following fixed keywords for relationship_keywords: defines, implements, depends_on, uses, calls, imports, extends, composes, owned_by, authored_by, assigned_to, relates_to, blocks, blocked_by, tests, fixes. If none applies, use relates_to.
 
 3. Identify high-level key words that summarize the main concepts, themes, or topics of the entire text. These should capture the overarching ideas present in the document.
 Format the content-level key words as ("content_keywords"{tuple_delimiter}<high_level_keywords>)
