@@ -11,7 +11,7 @@ PROMPTS["DEFAULT_COMPLETION_DELIMITER"] = "<|COMPLETE|>"
 PROMPTS["DEFAULT_USER_PROMPT"] = "n/a"
 
 PROMPTS["entity_extraction"] = """---Task---
-Given a text document and a list of entity types, identify all entities of those types and all relationships among the identified entities.
+For a given text and a list of entity types, extract all entities and their relationships, then return them in the specified language and format described below.
 
 ---Instructions---
 1. Recognizing definitively conceptualized entities in text. For each identified entity, extract the following information:
@@ -26,8 +26,8 @@ Given a text document and a list of entity types, identify all entities of those
   - relationship_description: Explain the nature of the relationship between the source and target entities, providing a clear rationale for their connection
 4. Format each relationship as: (relationship{tuple_delimiter}<source_entity>{tuple_delimiter}<target_entity>{tuple_delimiter}<relationship_keywords>{tuple_delimiter}<relationship_description>)
 5. Use `{tuple_delimiter}` as field delimiter. Use `{record_delimiter}` as the entity or relation list delimiter.
-6. Return identified entities and relationships in {language}.
-7. Output `{completion_delimiter}` when all the entities and relationships are extracted.
+6. Output `{completion_delimiter}` when all the entities and relationships are extracted.
+7. Ensure the output language is {language}.
 
 ---Quality Guidelines---
 - Only extract entities and relationships that are clearly defined and meaningful in the context
@@ -45,6 +45,18 @@ Text:
 ```
 {input_text}
 ```
+
+---Output---
+"""
+
+PROMPTS["entity_continue_extraction"] = """---Task---
+Identify any missed entities or relationships in the last extraction task.
+
+---Instructions---
+1. Output the entities and realtionships in the same format as previous extraction task.
+2. Do not include entities and relations that have been previously extracted.
+3. If the entity doesn't clearly fit in any of`Entity_types` provided, classify it as "Other".
+4. Ensure the output language is {language}.
 
 ---Output---
 """
@@ -179,28 +191,6 @@ Description List:
 
 ---Output---
 """
-
-PROMPTS["entity_continue_extraction"] = """---Task---
-Identify any missed entities or relationships in the last extraction task.
-
----Instructions---
-1. Output the entities and realtionships in the same format as previous extraction task.
-2. Do not include entities and relations that have been previously extracted.
-3. If the entity doesn't clearly fit in any of`Entity_types` provided, classify it as "Other".
-4. Return identified entities and relationships in {language}.
-5. Output `{completion_delimiter}` when all the entities and relationships are extracted.
-
----Output---
-"""
-
-# TODO: Deprecated
-PROMPTS["entity_if_loop_extraction"] = """
----Goal---'
-
-Check if it appears some entities may have still been missed. Output "Yes" if so, otherwise "No".
-
----Output---
-Output:"""
 
 PROMPTS["fail_response"] = (
     "Sorry, I'm not able to provide an answer to that question.[no-context]"
