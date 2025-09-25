@@ -237,13 +237,20 @@ Consider the conversation history if provided to maintain conversational flow an
   - Use Markdown for clear formatting (e.g., headings, bold, lists).
   - The response should be presented in {response_type}.
 
-4. **Reference/Citation Format:**
+4. **References Section Format:**
   - The References section should be under heading: `### References`
-  - Citation format: `[n] Document Titile`
+  - Citation format: `* [n] Document Titile`
   - The Document Title in the citation must retain its original language.
   - Output each citation on an individual line
   - Provide maximum of 5 most relevant citations.
 
+5. **Reference Section Example:**
+```
+### References
+* [1] Document Title One
+* [2] Document Title Two
+* [3] Document Title Three
+```
 
 ---Source Data---
 Knowledge Graph and Document Chunks:
@@ -278,13 +285,20 @@ Consider the conversation history if provided to maintain conversational flow an
   - Use Markdown for clear formatting (e.g., headings, bold, lists).
   - The response should be presented in {response_type}.
 
-4. **Reference/Citation Format:**
+4. **References Section Format:**
   - The References section should be under heading: `### References`
-  - Citation format: `[n] Document Titile`
+  - Citation format: `* [n] Document Titile`
   - The Document Title in the citation must retain its original language.
   - Output each citation on an individual line
   - Provide maximum of 5 most relevant citations.
 
+5. **Reference Section Example:**
+```
+### References
+* [1] Document Title One
+* [2] Document Title Two
+* [3] Document Title Three
+```
 
 ---Source Data---
 Document Chunks:

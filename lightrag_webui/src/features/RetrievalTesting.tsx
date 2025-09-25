@@ -9,8 +9,10 @@ import { useSettingsStore } from '@/stores/settings'
 import { useDebounce } from '@/hooks/useDebounce'
 import QuerySettings from '@/components/retrieval/QuerySettings'
 import { ChatMessage, MessageWithError } from '@/components/retrieval/ChatMessage'
-import { EraserIcon, SendIcon } from 'lucide-react'
+import { EraserIcon, SendIcon, CopyIcon } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
+import { toast } from 'sonner'
+import { copyToClipboard } from '@/utils/clipboard'
 import type { QueryMode } from '@/api/lightrag'
 
 // Helper function to generate unique IDs with browser compatibility
@@ -311,6 +313,11 @@ export default function RetrievalTesting() {
       // Prepare query parameters
       const state = useSettingsStore.getState()
 
+      // Add user prompt to history if it exists and is not empty
+      if (state.querySettings.user_prompt && state.querySettings.user_prompt.trim()) {
+        state.addUserPromptToHistory(state.querySettings.user_prompt.trim())
+      }
+
       // Determine the effective mode
       const effectiveMode = modeOverride || state.querySettings.mode
 
@@ -587,6 +594,68 @@ export default function RetrievalTesting() {
     useSettingsStore.getState().setRetrievalHistory([])
   }, [setMessages])
 
+  // Handle copying message content with robust clipboard support
+  const handleCopyMessage = useCallback(async (message: MessageWithError) => {
+    let contentToCopy = '';
+
+    if (message.role === 'user') {
+      // User messages: copy original content
+      contentToCopy = message.content || '';
+    } else {
+      // Assistant messages: prefer processed display content, fallback to original content
+      const finalDisplayContent = message.displayContent !== undefined
+        ? message.displayContent
+        : (message.content || '');
+      contentToCopy = finalDisplayContent;
+    }
+
+    if (!contentToCopy.trim()) {
+      toast.error(t('retrievePanel.chatMessage.copyEmpty', 'No content to copy'));
+      return;
+    }
+
+    try {
+      const result = await copyToClipboard(contentToCopy);
+
+      if (result.success) {
+        // Show success message with method used
+        const methodMessages: Record<string, string> = {
+          'clipboard-api': t('retrievePanel.chatMessage.copySuccess', 'Content copied to clipboard'),
+          'execCommand': t('retrievePanel.chatMessage.copySuccessLegacy', 'Content copied (legacy method)'),
+          'manual-select': t('retrievePanel.chatMessage.copySuccessManual', 'Content copied (manual method)'),
+          'fallback': t('retrievePanel.chatMessage.copySuccess', 'Content copied to clipboard')
+        };
+
+        toast.success(methodMessages[result.method] || t('retrievePanel.chatMessage.copySuccess', 'Content copied to clipboard'));
+      } else {
+        // Show error with fallback instructions
+        if (result.method === 'fallback') {
+          toast.error(
+            result.error || t('retrievePanel.chatMessage.copyFailed', 'Failed to copy content'),
+            {
+              description: t('retrievePanel.chatMessage.copyManualInstruction', 'Please select and copy the text manually')
+            }
+          );
+        } else {
+          toast.error(
+            t('retrievePanel.chatMessage.copyFailed', 'Failed to copy content'),
+            {
+              description: result.error
+            }
+          );
+        }
+      }
+    } catch (err) {
+      console.error('Clipboard operation failed:', err);
+      toast.error(
+        t('retrievePanel.chatMessage.copyError', 'Copy operation failed'),
+        {
+          description: err instanceof Error ? err.message : 'Unknown error occurred'
+        }
+      );
+    }
+  }, [t])
+
   return (
     <div className="flex size-full gap-2 px-2 pb-12 overflow-hidden">
       <div className="flex grow flex-col gap-4">
@@ -611,9 +680,31 @@ export default function RetrievalTesting() {
                   return (
                     <div
                       key={message.id} // Use stable ID for key
-                      className={`flex ${message.role === 'user' ? 'justify-end' : 'justify-start'}`}
+                      className={`flex ${message.role === 'user' ? 'justify-end' : 'justify-start'} items-end gap-2`}
                     >
-                      {<ChatMessage message={message} />}
+                      {message.role === 'user' && (
+                        <Button
+                          onClick={() => handleCopyMessage(message)}
+                          className="mb-2 size-6 rounded-md opacity-60 transition-opacity hover:opacity-100 shrink-0"
+                          tooltip={t('retrievePanel.chatMessage.copyTooltip')}
+                          variant="ghost"
+                          size="icon"
+                        >
+                          <CopyIcon className="size-4" />
+                        </Button>
+                      )}
+                      <ChatMessage message={message} />
+                      {message.role === 'assistant' && (
+                        <Button
+                          onClick={() => handleCopyMessage(message)}
+                          className="mb-2 size-6 rounded-md opacity-60 transition-opacity hover:opacity-100 shrink-0"
+                          tooltip={t('retrievePanel.chatMessage.copyTooltip')}
+                          variant="ghost"
+                          size="icon"
+                        >
+                          <CopyIcon className="size-4" />
+                        </Button>
+                      )}
                     </div>
                   );
                 })
