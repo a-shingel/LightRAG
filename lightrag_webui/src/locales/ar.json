@@ -187,7 +187,21 @@
       "unknown": "غير معروف",
       "object": "مصنوع",
       "group": "مجموعة",
-      "technology": "العلوم"
+      "technology": "العلوم",
+      "product": "منتج",
+      "document": "وثيقة",
+      "content": "محتوى",
+      "data": "بيانات",
+      "artifact": "قطعة أثرية",
+      "concept": "مفهوم",
+      "naturalobject": "كائن طبيعي",
+      "method": "عملية",
+      "creature": "مخلوق",
+      "plant": "نبات",
+      "disease": "مرض",
+      "drug": "دواء",
+      "food": "طعام",
+      "other": "أخرى"
     },
     "sideBar": {
       "settings": {
@@ -318,23 +332,28 @@
       }
     },
     "search": {
-      "placeholder": "ابحث في العقد...",
+      "placeholder": "ابحث في العقد في الصفحة...",
       "message": "و {{count}} آخرون"
     },
     "graphLabels": {
-      "selectTooltip": "حدد تسمية الاستعلام",
-      "noLabels": "لم يتم العثور على تسميات",
+      "selectTooltip": "الحصول على الرسم البياني الفرعي لعقدة (تسمية)",
+      "noLabels": "لم يتم العثور على عقد",
       "label": "التسمية",
-      "placeholder": "ابحث في التسميات...",
+      "placeholder": "الاستعلام عن الرسم البياني الفرعي للعقدة...",
       "andOthers": "و {{count}} آخرون",
-      "refreshTooltip": "إعادة تحميل البيانات (بعد إضافة الملف)"
+      "refreshGlobalTooltip": "تحديث بيانات الرسم البياني العالمي وإعادة تعيين سجل البحث",
+      "refreshCurrentLabelTooltip": "تحديث بيانات الرسم البياني للصفحة الحالية",
+      "refreshingTooltip": "جارٍ تحديث البيانات..."
     },
     "emptyGraph": "فارغ (حاول إعادة التحميل)"
   },
   "retrievePanel": {
     "chatMessage": {
       "copyTooltip": "نسخ إلى الحافظة",
-      "copyError": "فشل نسخ النص إلى الحافظة"
+      "copyError": "فشل نسخ النص إلى الحافظة",
+      "thinking": "جاري التفكير...",
+      "thinkingTime": "وقت التفكير {{time}} ثانية",
+      "thinkingInProgress": "التفكير قيد التقدم..."
     },
     "retrieval": {
       "startPrompt": "ابدأ الاسترجاع بكتابة استفسارك أدناه",

@@ -7,6 +7,7 @@ from lightrag.base import (
     DocStatus,
     DocStatusStorage,
 )
+from lightrag.exceptions import StorageNotInitializedError
 from lightrag.utils import (
     get_pinyin_sort_key,
     load_json,
@@ -75,6 +76,8 @@ class JsonDocStatusStorage(DocStatusStorage):
         Any other state (including records created as a baseline with zero chunks)
         should be reprocessed to recover from partial/failed ingestion.
         """
+        if self._storage_lock is None:
+            raise StorageNotInitializedError("JsonDocStatusStorage")
         async with self._storage_lock:
             processable: set[str] = set()
             for key in keys:
@@ -109,6 +112,8 @@ class JsonDocStatusStorage(DocStatusStorage):
 
     async def get_by_ids(self, ids: list[str]) -> list[dict[str, Any]]:
         result: list[dict[str, Any]] = []
+        if self._storage_lock is None:
+            raise StorageNotInitializedError("JsonDocStatusStorage")
         async with self._storage_lock:
             for id in ids:
                 data = self._data.get(id, None)
@@ -119,6 +124,8 @@ class JsonDocStatusStorage(DocStatusStorage):
     async def get_status_counts(self) -> dict[str, int]:
         """Get counts of documents in each status"""
         counts = {status.value: 0 for status in DocStatus}
+        if self._storage_lock is None:
+            raise StorageNotInitializedError("JsonDocStatusStorage")
         async with self._storage_lock:
             for doc in self._data.values():
                 counts[doc["status"]] += 1
@@ -205,6 +212,8 @@ class JsonDocStatusStorage(DocStatusStorage):
         logger.debug(
             f"[{self.workspace}] Inserting {len(data)} records to {self.namespace}"
         )
+        if self._storage_lock is None:
+            raise StorageNotInitializedError("JsonDocStatusStorage")
         async with self._storage_lock:
             # Ensure chunks_list field exists for new documents
             for doc_id, doc_data in data.items():
@@ -352,6 +361,27 @@ class JsonDocStatusStorage(DocStatusStorage):
 
             if any_deleted:
                 await set_all_update_flags(self.final_namespace)
+
+    async def get_doc_by_file_path(self, file_path: str) -> Union[dict[str, Any], None]:
+        """Get document by file path
+
+        Args:
+            file_path: The file path to search for
+
+        Returns:
+            Union[dict[str, Any], None]: Document data if found, None otherwise
+            Returns the same format as get_by_ids method
+        """
+        if self._storage_lock is None:
+            raise StorageNotInitializedError("JsonDocStatusStorage")
+
+        async with self._storage_lock:
+            for doc_id, doc_data in self._data.items():
+                if doc_data.get("file_path") == file_path:
+                    # Return complete document data, consistent with get_by_ids method
+                    return doc_data
+
+        return None
 
     async def drop(self) -> dict[str, str]:
         """Drop all document status data from storage and clean up resources
