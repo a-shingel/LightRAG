@@ -961,7 +961,7 @@ class LightRAG:
                 doc_key = compute_mdhash_id(full_text, prefix="doc-")
             else:
                 doc_key = doc_id
-            new_docs = {doc_key: {"content": full_text}}
+            new_docs = {doc_key: {"content": full_text, "file_path": file_path}}
 
             _add_doc_keys = await self.full_docs.filter_keys({doc_key})
             new_docs = {k: v for k, v in new_docs.items() if k in _add_doc_keys}
@@ -1139,7 +1139,10 @@ class LightRAG:
         # 4. Store document content in full_docs and status in doc_status
         #    Store full document content separately
         full_docs_data = {
-            doc_id: {"content": contents[doc_id]["content"]}
+            doc_id: {
+                "content": contents[doc_id]["content"],
+                "file_path": contents[doc_id]["file_path"],
+            }
             for doc_id in new_docs.keys()
         }
         await self.full_docs.upsert(full_docs_data)
@@ -2322,6 +2325,8 @@ class LightRAG:
         Returns:
             dict[str, Any]: Complete response with structured data and LLM response.
         """
+        logger.debug(f"[aquery_llm] Query param: {param}")
+
         global_config = asdict(self)
 
         try:
@@ -2566,11 +2571,12 @@ class LightRAG:
         return found_statuses
 
     async def adelete_by_doc_id(self, doc_id: str) -> DeletionResult:
-        """Delete a document and all its related data, including chunks, graph elements, and cached entries.
+        """Delete a document and all its related data, including chunks, graph elements.
 
         This method orchestrates a comprehensive deletion process for a given document ID.
         It ensures that not only the document itself but also all its derived and associated
-        data across different storage layers are removed. If entities or relationships are partially affected, it triggers.
+        data across different storage layers are removed or rebuiled. If entities or relationships
+        are partially affected, they will be rebuilded using LLM cached from remaining documents.
 
         Args:
             doc_id (str): The unique identifier of the document to be deleted.
@@ -2611,7 +2617,12 @@ class LightRAG:
                 )
 
             # Check document status and log warning for non-completed documents
-            doc_status = doc_status_data.get("status")
+            raw_status = doc_status_data.get("status")
+            try:
+                doc_status = DocStatus(raw_status)
+            except ValueError:
+                doc_status = raw_status
+
             if doc_status != DocStatus.PROCESSED:
                 if doc_status == DocStatus.PENDING:
                     warning_msg = (
@@ -2621,12 +2632,23 @@ class LightRAG:
                     warning_msg = (
                         f"Deleting {doc_id} {file_path}(previous status: PROCESSING)"
                     )
+                elif doc_status == DocStatus.PREPROCESSED:
+                    warning_msg = (
+                        f"Deleting {doc_id} {file_path}(previous status: PREPROCESSED)"
+                    )
                 elif doc_status == DocStatus.FAILED:
                     warning_msg = (
                         f"Deleting {doc_id} {file_path}(previous status: FAILED)"
                     )
                 else:
-                    warning_msg = f"Deleting {doc_id} {file_path}(previous status: {doc_status.value})"
+                    status_text = (
+                        doc_status.value
+                        if isinstance(doc_status, DocStatus)
+                        else str(doc_status)
+                    )
+                    warning_msg = (
+                        f"Deleting {doc_id} {file_path}(previous status: {status_text})"
+                    )
                 logger.info(warning_msg)
                 # Update pipeline status for monitoring
                 async with pipeline_status_lock:

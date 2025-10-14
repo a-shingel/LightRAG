@@ -401,7 +401,7 @@ async def _handle_single_relationship_extraction(
     ):  # treat "relationship" and "relation" interchangeable
         if len(record_attributes) > 1 and "relation" in record_attributes[0]:
             logger.warning(
-                f"{chunk_key}: LLM output format error; found {len(record_attributes)}/5 fields on REALTION `{record_attributes[1]}`~`{record_attributes[2] if len(record_attributes) >2 else 'N/A'}`"
+                f"{chunk_key}: LLM output format error; found {len(record_attributes)}/5 fields on REALTION `{record_attributes[1]}`~`{record_attributes[2] if len(record_attributes) > 2 else 'N/A'}`"
             )
             logger.debug(record_attributes)
         return None
@@ -2225,7 +2225,7 @@ async def extract_entities(
             await asyncio.wait(pending)
 
         # Add progress prefix to the exception message
-        progress_prefix = f"C[{processed_chunks+1}/{total_chunks}]"
+        progress_prefix = f"C[{processed_chunks + 1}/{total_chunks}]"
 
         # Re-raise the original exception with a prefix
         prefixed_exception = create_prefixed_exception(first_exception, progress_prefix)
@@ -2368,8 +2368,8 @@ async def kg_query(
         query_param.max_entity_tokens,
         query_param.max_relation_tokens,
         query_param.max_total_tokens,
-        query_param.hl_keywords or [],
-        query_param.ll_keywords or [],
+        hl_keywords_str,
+        ll_keywords_str,
         query_param.user_prompt or "",
         query_param.enable_rerank,
     )
@@ -2402,8 +2402,8 @@ async def kg_query(
                 "max_entity_tokens": query_param.max_entity_tokens,
                 "max_relation_tokens": query_param.max_relation_tokens,
                 "max_total_tokens": query_param.max_total_tokens,
-                "hl_keywords": query_param.hl_keywords or [],
-                "ll_keywords": query_param.ll_keywords or [],
+                "hl_keywords": hl_keywords_str,
+                "ll_keywords": ll_keywords_str,
                 "user_prompt": query_param.user_prompt or "",
                 "enable_rerank": query_param.enable_rerank,
             }
@@ -2491,8 +2491,6 @@ async def extract_keywords_only(
     args_hash = compute_args_hash(
         param.mode,
         text,
-        param.hl_keywords or [],
-        param.ll_keywords or [],
     )
     cached_result = await handle_cache(
         hashing_kv, args_hash, text, param.mode, cache_type="keywords"
@@ -2568,8 +2566,6 @@ async def extract_keywords_only(
                 "max_entity_tokens": param.max_entity_tokens,
                 "max_relation_tokens": param.max_relation_tokens,
                 "max_total_tokens": param.max_total_tokens,
-                "hl_keywords": param.hl_keywords or [],
-                "ll_keywords": param.ll_keywords or [],
                 "user_prompt": param.user_prompt or "",
                 "enable_rerank": param.enable_rerank,
             }
@@ -3232,12 +3228,12 @@ async def _build_llm_context(
                 chunk_tracking_log.append("?0/0")
 
         if chunk_tracking_log:
-            logger.info(f"chunks S+F/O: {' '.join(chunk_tracking_log)}")
+            logger.info(f"Final chunks S+F/O: {' '.join(chunk_tracking_log)}")
 
     text_units_str = "\n".join(
         json.dumps(text_unit, ensure_ascii=False) for text_unit in text_units_context
     )
-    reference_list_str = "\n\n".join(
+    reference_list_str = "\n".join(
         f"[{ref['reference_id']}] {ref['file_path']}"
         for ref in reference_list
         if ref["reference_id"]
@@ -4128,7 +4124,7 @@ async def naive_query(
     text_units_str = "\n".join(
         json.dumps(text_unit, ensure_ascii=False) for text_unit in text_units_context
     )
-    reference_list_str = "\n\n".join(
+    reference_list_str = "\n".join(
         f"[{ref['reference_id']}] {ref['file_path']}"
         for ref in reference_list
         if ref["reference_id"]
@@ -4165,8 +4161,6 @@ async def naive_query(
         query_param.max_entity_tokens,
         query_param.max_relation_tokens,
         query_param.max_total_tokens,
-        query_param.hl_keywords or [],
-        query_param.ll_keywords or [],
         query_param.user_prompt or "",
         query_param.enable_rerank,
     )
@@ -4197,8 +4191,6 @@ async def naive_query(
                 "max_entity_tokens": query_param.max_entity_tokens,
                 "max_relation_tokens": query_param.max_relation_tokens,
                 "max_total_tokens": query_param.max_total_tokens,
-                "hl_keywords": query_param.hl_keywords or [],
-                "ll_keywords": query_param.ll_keywords or [],
                 "user_prompt": query_param.user_prompt or "",
                 "enable_rerank": query_param.enable_rerank,
             }

@@ -27,9 +27,18 @@ git clone https://github.com/HKUDS/lightrag.git
 # Change to the repository directory
 cd lightrag
 
-# create a Python virtual environment if necessary
+# Create a Python virtual environment
+uv venv --seed --python 3.12
+source .venv/bin/acivate
+
 # Install in editable mode with API support
 pip install -e ".[api]"
+
+# Build front-end artifacts
+cd lightrag_webui
+bun install --frozen-lockfile
+bun run build
+cd ..
 ```
 
 ### Before Starting LightRAG Server
@@ -120,15 +129,23 @@ services:
   lightrag:
     container_name: lightrag
     image: ghcr.io/hkuds/lightrag:latest
+    build:
+      context: .
+      dockerfile: Dockerfile
+      tags:
+        - ghcr.io/hkuds/lightrag:latest
     ports:
       - "${PORT:-9621}:9621"
     volumes:
       - ./data/rag_storage:/app/data/rag_storage
       - ./data/inputs:/app/data/inputs
+      - ./data/tiktoken:/app/data/tiktoken
       - ./config.ini:/app/config.ini
       - ./.env:/app/.env
     env_file:
       - .env
+    environment:
+      - TIKTOKEN_CACHE_DIR=/app/data/tiktoken
     restart: unless-stopped
     extra_hosts:
       - "host.docker.internal:host-gateway"
@@ -142,6 +159,10 @@ docker compose up
 ```
 
 > You can get the official docker compose file from here: [docker-compose.yml](https://raw.githubusercontent.com/HKUDS/LightRAG/refs/heads/main/docker-compose.yml). For historical versions of LightRAG docker images, visit this link: [LightRAG Docker Images](https://github.com/HKUDS/LightRAG/pkgs/container/lightrag)
+
+### Offline Deployment
+
+ For offline or air-gapped environments, see the [Offline Deployment Guide](./../../docs/OfflineDeployment.md) for instructions on pre-installing all dependencies and cache files.
 
 ### Starting Multiple LightRAG Instances
 
@@ -280,7 +301,17 @@ LIGHTRAG_API_KEY=your-secure-api-key-here
 WHITELIST_PATHS=/health,/api/*
 ```
 
-> Health check and Ollama emulation endpoints are excluded from API Key check by default.
+> Health check and Ollama emulation endpoints are excluded from API Key check by default. For security reasons, remove `/api/*` from `WHITELIST_PATHS` if the Ollama service is not required.
+
+The API key is passed using the request header `X-API-Key`. Below is an example of accessing the LightRAG Server via API:
+
+```
+curl -X 'POST' \
+  'http://localhost:9621/documents/scan' \
+  -H 'accept: application/json' \
+  -H 'X-API-Key: your-secure-api-key-here-123' \
+  -d ''
+```
 
 * Account credentials (the Web UI requires login before access can be granted):
 
