@@ -3,7 +3,6 @@ import { persist, createJSONStorage } from 'zustand/middleware'
 import { createSelectors } from '@/lib/utils'
 import { defaultQueryLabel } from '@/lib/constants'
 import { Message, QueryRequest } from '@/api/lightrag'
-import i18n from '@/i18n'
 
 type Theme = 'dark' | 'light' | 'system'
 type Language = 'en' | 'zh' | 'fr' | 'ar' | 'zh_TW'
@@ -124,7 +123,6 @@ const useSettingsStoreBase = create<SettingsState>()(
 
       querySettings: {
         mode: 'global',
-        response_type: 'Multiple Paragraphs',
         top_k: 40,
         chunk_top_k: 20,
         max_entity_tokens: 6000,
@@ -142,10 +140,6 @@ const useSettingsStoreBase = create<SettingsState>()(
 
       setLanguage: (language: Language) => {
         set({ language })
-        // Update i18n after state is updated
-        if (i18n.language !== language) {
-          i18n.changeLanguage(language)
-        }
       },
 
       setGraphLayoutMaxIterations: (iterations: number) =>
@@ -244,7 +238,7 @@ const useSettingsStoreBase = create<SettingsState>()(
     {
       name: 'settings-storage',
       storage: createJSONStorage(() => localStorage),
-      version: 18,
+      version: 19,
       migrate: (state: any, version: number) => {
         if (version < 2) {
           state.showEdgeLabel = false
@@ -340,6 +334,12 @@ const useSettingsStoreBase = create<SettingsState>()(
         if (version < 18) {
           // Add userPromptHistory field for older versions
           state.userPromptHistory = []
+        }
+        if (version < 19) {
+          // Remove deprecated response_type parameter
+          if (state.querySettings) {
+            delete state.querySettings.response_type
+          }
         }
         return state
       }
